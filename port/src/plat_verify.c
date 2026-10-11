@@ -38,6 +38,55 @@ static char sFirst[4][40];
 static int sAtLeast; /* counted by size only (the quick pass): files of the same size were not read */
 static char sSummary[160];
 
+/* Files the setup itself put in mods/: the game data's save-file texts, rewritten so they stop talking about a
+   memory card (port/tools/patch_texts.py and, in a release, native.cpp). Those are part of a normal install and
+   are not "modified game data"; anything else a player drops in mods/ still is. The list is
+   <root>/mods/installed.txt, one path per line, written by the step that makes them. */
+static char **sInstalled;
+static int sInstalledCount;
+
+static void load_installed(const char *root) {
+    char line[256];
+    FILE *f;
+
+    snprintf(line, sizeof(line), "%s/mods/installed.txt", root);
+    f = fopen(line, "r");
+    if (f == NULL) {
+        return;
+    }
+    while (fgets(line, sizeof(line), f) != NULL) {
+        size_t n = strlen(line);
+        char **grown;
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) {
+            line[--n] = '\0';
+        }
+        if (n == 0) {
+            continue;
+        }
+        grown = realloc(sInstalled, (size_t)(sInstalledCount + 1) * sizeof(*sInstalled));
+        if (grown == NULL) {
+            break;
+        }
+        sInstalled = grown;
+        sInstalled[sInstalledCount] = strdup(line);
+        if (sInstalled[sInstalledCount] == NULL) {
+            break;
+        }
+        sInstalledCount++;
+    }
+    fclose(f);
+}
+
+static int is_installed(const char *rel) {
+    int k;
+    for (k = 0; k < sInstalledCount; k++) {
+        if (strcmp(sInstalled[k], rel) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int Port_DataState(void) { return sState; }
 /* One line for the log, the notice and the crash report; "" unless the data is modified. */
 const char *Port_DataSummary(void) {
@@ -127,6 +176,7 @@ static void finish(void) {
 
 static void *verify_thread(void *arg) {
     const char *root = Port_FileRoot();
+    load_installed(root);
     char path[700], rel[64], cache[700];
     uint32_t sig = 0;
     struct stat st;
@@ -147,7 +197,7 @@ static void *verify_thread(void *arg) {
             rec[1] = (uint64_t)st.st_mtime;
         }
         snprintf(path, sizeof(path), "%s/mods/%s", root, rel);
-        if (stat(path, &st) == 0) {
+        if (stat(path, &st) == 0 && !is_installed(rel)) {
             rec[2] = (uint64_t)st.st_size + 1;
         }
         /* the quick pass: a replaced, missing or resized file shows without reading anything */
@@ -202,7 +252,7 @@ static void *verify_thread(void *arg) {
 
         rel_of(n, rel, sizeof(rel));
         snprintf(path, sizeof(path), "%s/mods/%s", root, rel);
-        if (stat(path, &st) == 0) {
+        if (stat(path, &st) == 0 && !is_installed(rel)) {
             note(rel);
             sMods++;
             continue;

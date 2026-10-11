@@ -108,6 +108,13 @@ extern s32 Dialog_IsOpen(void);
     }
 #define MCF_OK_PRESSED() (gPad[0].gamePressed & 0x200)
 
+#ifdef PORT
+/* The port's autosave (port/src/plat_autosave.c): with it on, the flow's questions are answered for you, so the
+   save the story asks for at the end of a chapter happens without stopping for the player. On by default;
+   BT3_AUTOSAVE=0 (or the `autosave` setting at 0) turns it off and the dialogs come back. */
+extern int Port_Autosave(void);
+#endif
+
 /* 0x2FE940: the first word of this object's .sdata. */
 McFlow *gMcFlow = NULL;
 
@@ -264,6 +271,14 @@ void McFlow_UpdateSave(void) {
     case 0xC:
         Dialog_SetChoices(1);
         gMcFlow->msg = 0xD;
+#ifdef PORT
+        /* Autosave (port/src/plat_autosave.c) answers "Save game data?" for the player. It writes the same answer
+           in `choice` that a Yes would, so the branch below runs the one a Yes runs, its 12-frame wait included. */
+        if (Port_Autosave() && gMcFlow->choice == 0) {
+            gMcFlow->choice = 1;
+            gMcFlow->timer = 0xC;
+        }
+#endif
         if (gMcFlow->choice > 0) {
             if (--gMcFlow->timer >= 0) {
                 break;
@@ -341,6 +356,10 @@ void McFlow_UpdateSave(void) {
         }
         break;
     case 0xE:
+        /* msg 0xF ("the card was replaced with another"): state 3 lands here when the card check came back with
+           an error (src/battle/stgm_a_b.c puts -1 there the first time a card is seen in a session). It is an
+           error report, not a save question, and state 3 returns to it whenever the check fails again -- so it
+           is deliberately NOT auto-answered, which would spin 3 -> 0xE -> 3 forever. The player decides. */
         Dialog_SetChoices(1);
         gMcFlow->msg = 0xF;
         if (gMcFlow->choice > 0) {
@@ -408,6 +427,13 @@ void McFlow_UpdateSave(void) {
         Dialog_SetChoices(1);
         gMcFlow->msg = 0xE;
         McCard_Probe(0);
+#ifdef PORT
+        /* The same for "Save data already exists. Overwrite?": answered with a Yes, which goes on to 0xF. */
+        if (Port_Autosave() && gMcFlow->choice == 0) {
+            gMcFlow->choice = 1;
+            gMcFlow->timer = 0xC;
+        }
+#endif
         if (McCard_IsFatalError(MCF_CARD.result)) {
             gMcFlow->state = 0x1B;
             gMcFlow->timer = 0x78;

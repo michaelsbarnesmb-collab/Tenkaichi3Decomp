@@ -69,6 +69,13 @@ Optional: a file songs.txt here, one line per song, "file.adx|Name In The Menu",
 Added songs are not written to your save, and they are not offered in an online match (Dragon Net Battle).
 """
 
+SOUNDS_NOTE = """Sound played while an online match is set up.
+
+net.wav in this folder is the one that goes underneath the connecting screen: the radar turning and the line
+looking for an opponent. It is a WAV anything SDL can read; replace it with one of your own to change it, or
+delete it and the screen goes quiet and keeps working.
+"""
+
 
 def take_program(exe, out):
     """The program without the game's data, and its list, into the release folder. A program built from the blank
@@ -149,9 +156,10 @@ def main_win():
     shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
     (out / "textures").mkdir()
     (out / "textures/README.txt").write_text(TEXTURES_NOTE.replace("\n", "\r\n"))
-    for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
+    for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE), ("sounds", SOUNDS_NOTE)):
         (out / kind).mkdir()
         (out / kind / "README.txt").write_text(note.replace("\n", "\r\n"))
+    shutil.copy2(ROOT / "port/extras/sounds/net.wav", out / "sounds/net.wav")
     (lic / "sdl3.txt").write_text("SDL3 (SDL3.dll) is distributed under the zlib license: https://www.libsdl.org/license.php\n")
     for f in (out / "Tenkaichi3Decomp.exe", out / "Tenkaichi3Decomp-setup.exe"):
         subprocess.run([toolchain.PREFIX + "strip", "--strip-debug", str(f)], check=False)
@@ -189,9 +197,12 @@ def main():
     shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
     (OUT / "textures").mkdir()
     (OUT / "textures/README.txt").write_text(TEXTURES_NOTE)
-    for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
+    for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE), ("sounds", SOUNDS_NOTE)):
         (OUT / kind).mkdir()
         (OUT / kind / "README.txt").write_text(note)
+    # the loop under the connecting screen: the port's own sound, not the game's, so it travels in the
+    # repository and is put next to the program, where plat_extras.c looks for it first (BT3_SOUNDS names another)
+    shutil.copy2(ROOT / "port/extras/sounds/net.wav", OUT / "sounds/net.wav")
     (lic / "sdl3.txt").write_text("SDL3 (lib/libSDL3.so.0) is distributed under the zlib license: https://www.libsdl.org/license.php\n")
     for f in (OUT / "Tenkaichi3Decomp", OUT / "Tenkaichi3Decomp-setup"):
         subprocess.run(["strip", "--strip-debug", str(f)], check=False)  # the symbol names stay (crash reports use them)

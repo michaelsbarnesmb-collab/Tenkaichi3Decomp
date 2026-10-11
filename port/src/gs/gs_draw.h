@@ -137,6 +137,8 @@ typedef struct GsBackend {
     const char *name;                     /* "vulkan", "opengl" */
     int (*init)(void);                    /* window + device + fixed pipelines + white texture; 0 = failed */
     void (*frameEnd)(void);               /* events, uploads, replay the list, present, UI, screenshots */
+    void (*idleFrame)(void);              /* present a black frame plus the UI, with no frame of the game's:
+                                            the game thread is stopped waiting (net_screen.c, gs/net.c) */
     void (*scaleChanged)(void);           /* gsScale just changed: wait idle, drop and rebuild what is sized */
     GsTex (*whiteTex)(void);              /* the 1x1 white texture made in init */
     GsTex (*texCreate)(uint32_t w, uint32_t h, int format, int levels); /* 0 = at capacity / unsupported */

@@ -1178,6 +1178,14 @@ static void render_wait(void) {
     pthread_mutex_unlock(&sLock);
 }
 
+/* The same wait, for the one place the game thread presents for itself: Gs_PresentIdle (net_screen.c), while it is
+   stopped waiting for the network. With no render thread this returns at once. */
+void Gs_RenderWait(void) {
+    if (sThreaded) {
+        render_wait();
+    }
+}
+
 static void render_post(int job, uint32_t tadr, int tte) {
     pthread_mutex_lock(&sLock);
     sJob = job;
