@@ -103,6 +103,10 @@ int __wrap_Progress_Main(int arg) {
         extern void Port_VerifyStart(void); /* plat_verify.c: is the data the original disc's (in the background) */
         Port_VerifyStart();
     }
+    {
+        extern void Port_DiscordStart(void); /* plat_discord.c: what the player is doing, on Discord */
+        Port_DiscordStart();
+    }
     port_stage_replace_init();
     path = getenv("BT3_REPLAY");
 
@@ -141,6 +145,10 @@ int __wrap_Progress_Main(int arg) {
             gPortMenuMode = 1; /* the renderer treats all 2D as one centred 4:3 page while the menus run */
             r = __real_Progress_Main(arg);
             gPortMenuMode = 0;
+            {
+                extern void Port_DiscordTick(void); /* plat_discord.c: menus / story / fight, on Discord */
+                Port_DiscordTick();
+            }
             sFromMenu = 1; /* a battle set up by the real menus follows: the traces apply to it too */
             return r;
         }

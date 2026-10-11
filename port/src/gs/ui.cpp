@@ -61,6 +61,10 @@ int Port_LobbyRelayed(void);                                 // the other player
 int Port_LobbyPoll(void);
 void Port_LobbyCancel(void);
 void Port_LobbyLaunch(void);
+extern int Port_DiscordEnabled(void);  /* plat_discord.c: Rich Presence */
+extern void Port_DiscordEnabledSet(int on);
+extern const char *Port_DiscordClientId(void);
+extern void Port_DiscordClientIdSet(const char *id);
 }
 static bool sReady, sOpen;
 static bool sNet;                              // the open window is the online screen (Dragon Net Battle), not the settings
@@ -942,7 +946,7 @@ extern "C" {
 extern volatile int gPortUnlockAll, gPortUnlockDone;
 }
 
-static void cheats_tab(void) {
+static void misc_tab(void) {
     ImGui::TextWrapped("Unlock everything: all characters, stages, music and items, and the largest amount of Zenni. "
                        "This is a debug function the game's developers left in.");
     ImGui::Spacing();
@@ -1120,7 +1124,7 @@ static void build(void) {
                 controls_tab();
                 ImGui::EndTabItem();
             }
-            if (tab("Cheats", 4)) { cheats_tab(); ImGui::EndTabItem(); }
+            if (tab("Misc", 4)) { misc_tab(); ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         ImGui::EndChild();
@@ -1201,6 +1205,41 @@ static void meter_count(void) { // once per frame shown
         frames = 0;
         blanks0 = gPortLiveBlanks;
         t0 = now;
+    }
+    ImGui::Separator();
+    /* Discord Rich Presence (plat_discord.c): what the player is doing on their Discord profile. Off until an
+       application id is given: Discord only shows a presence for a registered application, and the name on the
+       card is that application's, not this game's. */
+    {
+        static bool showSteps;
+        bool on = Port_DiscordEnabled() != 0;
+        if (ImGui::Checkbox("Discord Rich Presence", &on)) {
+            Port_DiscordEnabledSet(on);
+        }
+        ImGui::SetItemTooltip("Shows what you are doing -- in the menus, in the story, in a fight --\n"
+                              "on your Discord profile. Discord has to be running. Nothing leaves\n"
+                              "this machine: it is a local connection between the game and the client.");
+        ImGui::BeginDisabled(!on);
+        {
+            char id[32];
+            snprintf(id, sizeof(id), "%s", Port_DiscordClientId());
+            if (ImGui::InputText("Application ID", id, sizeof(id))) {
+                Port_DiscordClientIdSet(id);
+                snprintf(id, sizeof(id), "%s", Port_DiscordClientId()); /* it is digits only */
+            }
+            ImGui::SetItemTooltip("The Discord application's id: eighteen digits.");
+            showSteps = (showSteps || Port_DiscordClientId()[0] == '\0') && ImGui::TreeNode("How to get one");
+            if (showSteps) {
+                ImGui::TextWrapped("1. Open discord.com/developers/applications and sign in.");
+                ImGui::TextWrapped("2. \"New Application\", name it, create it.");
+                ImGui::TextWrapped("3. \"General Information\": copy the Application ID here.");
+                ImGui::TextWrapped("4. Optional: Rich Presence > Art Assets, upload a 512x512 image.");
+                ImGui::TextWrapped("5. Leave Discord running. It appears in your profile a moment later.");
+                ImGui::TextWrapped("You do not see your own presence: look from another account.");
+                ImGui::TreePop();
+            }
+        }
+        ImGui::EndDisabled();
     }
 }
 

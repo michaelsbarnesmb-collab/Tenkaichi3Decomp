@@ -14,7 +14,12 @@
 #include <string.h>
 
 #define MAX_SETTINGS 200
+#define MAX_STRINGS 16
 static struct { char name[24]; int value; } sSet[MAX_SETTINGS];
+/* A few settings are text, not a number: a Discord application id is eighteen digits, which is wider than any
+   integer here. They are kept apart so the number ones stay numbers in the file, and written after them. */
+static struct { char name[24]; char value[64]; } sStr[MAX_STRINGS];
+static int sStrCount;
 static int sDirty;
 static int sCount;
 static pthread_once_t sOnce = PTHREAD_ONCE_INIT;
@@ -34,6 +39,10 @@ static void load(void) {
         if (sscanf(line, " %23[a-z0-9_]=%d", name, &value) == 2) {
             strcpy(sSet[sCount].name, name);
             sSet[sCount++].value = value;
+        } else if (sStrCount < MAX_STRINGS && sscanf(line, " %23[a-z0-9_]=%63[^\n]", name, sStr[sStrCount].value) == 2) {
+            /* a line that is not a number: name=text, the Discord application id among them */
+            strcpy(sStr[sStrCount].name, name);
+            sStrCount++;
         }
     }
     if (fp != NULL) {
@@ -77,6 +86,45 @@ void Port_SettingSave(const char *name, int value) {
     pthread_mutex_unlock(&sLock);
 }
 
+/* A saved text setting, or `def`. The returned string is the settings' own; it is read under the lock and
+   stays valid until the next call that changes it. */
+const char *Port_SettingStr(const char *name, const char *def) {
+    static char got[64];
+    int i;
+
+    pthread_once(&sOnce, load);
+    pthread_mutex_lock(&sLock);
+    snprintf(got, sizeof(got), "%s", def);
+    for (i = 0; i < sStrCount; i++) {
+        if (strcmp(sStr[i].name, name) == 0) {
+            snprintf(got, sizeof(got), "%s", sStr[i].value);
+        }
+    }
+    pthread_mutex_unlock(&sLock);
+    return got;
+}
+
+/* Stores a text setting; Port_SettingsWrite puts it in the file. */
+void Port_SettingSaveStr(const char *name, const char *value) {
+    int i;
+
+    pthread_once(&sOnce, load);
+    pthread_mutex_lock(&sLock);
+    for (i = 0; i < sStrCount && strcmp(sStr[i].name, name) != 0; i++) {
+    }
+    if (i < MAX_STRINGS) {
+        if (i == sStrCount) {
+            snprintf(sStr[sStrCount].name, sizeof(sStr[sStrCount].name), "%s", name);
+            sStrCount++;
+        }
+        if (strcmp(sStr[i].value, value) != 0) {
+            snprintf(sStr[i].value, sizeof(sStr[i].value), "%s", value);
+            sDirty = 1;
+        }
+    }
+    pthread_mutex_unlock(&sLock);
+}
+
 void Port_SettingsWrite(void) {
     FILE *fp;
     int i;
@@ -86,6 +134,9 @@ void Port_SettingsWrite(void) {
     if (fp != NULL) {
         for (i = 0; i < sCount; i++) {
             fprintf(fp, "%s=%d\n", sSet[i].name, sSet[i].value);
+        }
+        for (i = 0; i < sStrCount; i++) {
+            fprintf(fp, "%s=%s\n", sStr[i].name, sStr[i].value);
         }
         fclose(fp);
     }
