@@ -12,9 +12,10 @@ Steps (each is skipped when its result is already there; --force redoes them):
   1. requirements       compilers and tools, with what to install when one is missing
   2. disc image         found, read, and checked against the known checksum of the release
   3. game data          unpacked into gamedata/ as loose files
-  4. executable data    the data tables of the game's two programs, split out for the build
-  5. build              the port itself (64-bit; --32 for the 32-bit build)
-  6. self-test          the game's own demo fight, run without a window
+  4. save-file texts    the game's save dialogs, rewritten to stop talking about a memory card
+  5. executable data    the data tables of the game's two programs, split out for the build
+  6. build              the port itself (64-bit; --32 for the 32-bit build)
+  7. self-test          the game's own demo fight, run without a window
 Everything the tools print goes to install.log.
 Standard library only; Linux for now."""
 import argparse, hashlib, os, pathlib, shutil, struct, subprocess, sys, threading, time
@@ -61,7 +62,7 @@ def run(cmd, env=None, cwd=ROOT):
 
 class Step:
     """One line of the wizard: `[3/6] Game data ... done (41 s)` with a running clock while it works."""
-    count, total = 0, 6
+    count, total = 0, 7
 
     def __init__(self, title):
         Step.count += 1
@@ -256,7 +257,33 @@ def step_gamedata(args, iso):
     s.ok(f"{files:,} files in gamedata/")
 
 
-# -------------------------------------------------------------------------------------------- 4. executable data
+# ------------------------------------------------------------------------------------------------ 4. save-file texts
+
+def step_texts(args):
+    """The game's save dialogs, rewritten to stop talking about a memory card: on a PC there is no card to
+    insert or format. port/tools/patch_texts.py works on gamedata/ and leaves the result in gamedata/mods/."""
+    data = ROOT / "gamedata"
+    done = data / "mods" / "pzs3us1" / "00473.bin"
+    if not args.force and done.is_file():
+        Step("Save-file texts").skip("already rewritten")
+        return
+    if not (data / "pzs3us1").is_dir():
+        Step("Save-file texts").skip("no game data yet")
+        return
+    s = Step("Save-file texts")
+    code, _ = run([sys.executable, ROOT / "port/tools/patch_texts.py", "--gamedata", data])
+    if code != 0:
+        s.fail("Rewriting the save-file texts failed (see install.log).\n"
+               "    The game data is left as the disc has it; the dialogs keep talking about the card.")
+    files = len(list((data / "mods" / "pzs3us1").glob("*.bin")))
+    # the list the game reads to know which files the setup put in mods/, so they are not counted as game data
+    # the player changed (port/src/plat_verify.c)
+    names = sorted(p.stem for p in (data / "pzs3us1").glob("*.bin") if (data / "mods" / "pzs3us1" / p.name).is_file())
+    (data / "mods" / "installed.txt").write_text("".join(f"pzs3us1/{n}.bin\n" for n in names))
+    s.ok(f"{files} files, in gamedata/mods/")
+
+
+# -------------------------------------------------------------------------------------------- 5. executable data
 
 def venv_python():
     return VENV / "bin" / "python"
@@ -380,6 +407,7 @@ def main():
             return 0
         iso = step_disc(args)
         step_gamedata(args, iso)
+        step_texts(args)
         step_split(args)
         exe = step_build(args)
         step_test(args, exe)

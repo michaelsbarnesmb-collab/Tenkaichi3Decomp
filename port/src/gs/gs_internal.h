@@ -71,6 +71,9 @@ void GsGpu_DrawVu6(int ctx, const float *vertices, uint32_t count, const float *
 void Gs_RegWrite(uint32_t addr, uint64_t d);
 void GsGpu_Native(int effect); /* marker register 0x7F: a native effect goes here */
 void GsGpu_FrameEnd(void);
+void Gs_PresentIdle(void); /* a black frame plus the overlay, with no frame of the game's (net_screen.c: the game
+                              thread is stopped waiting for the network) */
+void Gs_RenderWait(void);   /* blocks until the render thread (BT3_GS_THREAD) has nothing to do */
 /* The game is re-running frames it has already shown (online play after a late input; the save / restore test):
    nothing of them is to be seen or heard. The frame's list is still walked, because it also carries the texture
    uploads and vertex programs that later frames count on, but no draw is recorded, nothing is shown, and no

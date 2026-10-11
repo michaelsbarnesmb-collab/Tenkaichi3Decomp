@@ -3834,6 +3834,17 @@ static void skip_decide(void) {
     }
 }
 
+/* A black frame plus the overlay, with no frame of the game: the game thread has stopped to wait for the network
+   (net_screen.c, called from net.c's handshake), so nothing else would be shown. Nothing is replayed and no GS
+   state is touched; the back end only presents. */
+void Gs_PresentIdle(void) {
+    if (sBackend != NULL && sBackend->idleFrame != NULL) {
+        extern void Gs_RenderWait(void); /* gs_core.c: with BT3_GS_THREAD the render thread presents, so wait */
+        Gs_RenderWait();
+        sBackend->idleFrame();
+    }
+}
+
 void GsGpu_FrameEnd(void) {
     if (gPortResim) { /* a frame that is only being re-run: nothing was recorded, nothing is shown */
         return;

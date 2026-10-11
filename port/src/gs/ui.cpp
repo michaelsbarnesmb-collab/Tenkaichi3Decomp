@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
@@ -380,6 +381,187 @@ static void build_quit(void) {
 extern "C" {
 extern volatile int gPortNetMenuRequest;
 extern volatile int gPortNetWindowClose; // gs/state.c
+extern int Net_ScreenState(void);        // net_screen.h: Dragon Net Battle's connecting screen
+extern int Net_ScreenAlpha(void);
+extern float Net_ScreenPhase(void);
+extern void Net_ScreenBegin(void);
+extern void Net_ScreenEnd(void);
+extern int Net_ScreenIsFound(void);
+extern int Port_Autosave(void);        /* plat_autosave.c: save without asking */
+extern void Port_AutosaveSet(int on);
+}
+
+#define NS_TAU 6.28318530718f
+#define NS_PI 3.14159265359f
+static const ImU32 NS_CREAM = IM_COL32(241, 230, 200, 255);   /* texto y ejes claros */
+static const ImU32 NS_BRASS = IM_COL32(201, 162, 75, 255);    /* bisel y letras cardinales */
+static const ImU32 NS_AMBER = IM_COL32(255, 176, 46, 255);    /* flecha y "Opponent Found!" */
+
+/* El radar de "buscatesoros" dibujado con las primitivas de ImGui (el port no tiene navegador): bisel de latón,
+   aros y ejes, ticks cada 5 grados, letras N/E/S/O, ocho señales con el barrido y su eco, flecha GPS central y
+   viñeta. `cx,cy` es el centro, `R` el radio de la pantalla. `t` son los segundos desde que se abrió. */
+static void net_radar_draw(ImDrawList *dl, float cx, float cy, float R, float t) {
+    static const struct { float r, b, seed; } kSig[] = {
+        {0.14f, 38.0f, 1.1f},  {0.27f, 212.0f, 2.7f}, {0.38f, 301.0f, 3.9f}, {0.49f, 96.0f, 5.2f},
+        {0.58f, 157.0f, 6.4f}, {0.69f, 255.0f, 7.8f}, {0.80f, 12.0f, 9.3f},  {0.90f, 330.0f, 10.6f},
+    };
+    const float Rmax = R * 0.78f;
+    const float fs = fmaxf(10.0f, R * 0.056f);
+    float sw = fmodf(t / 5.0f, 1.0f) * NS_TAU; /* el barrido: un giro cada 5 s */
+
+    // Fondo: degradado radial #0f1b24 -> #070b12, con círculos concéntricos (ImGui no tiene degradado radial).
+    for (int i = 20; i >= 1; i--) {
+        float k = (float)i / 20.0f;
+        dl->AddCircleFilled(ImVec2(cx, cy), R * k,
+                            IM_COL32((int)(15.0f - 8.0f * k), (int)(27.0f - 16.0f * k), (int)(36.0f - 18.0f * k), 255), 48);
+    }
+    // Aros y ejes.
+    for (int i = 1; i <= 4; i++) {
+        dl->AddCircle(ImVec2(cx, cy), Rmax * i / 4.0f, IM_COL32(241, 230, 200, 41), 64, 1.0f);
+    }
+    dl->AddLine(ImVec2(cx - Rmax, cy), ImVec2(cx + Rmax, cy), IM_COL32(241, 230, 200, 41), 1.0f);
+    dl->AddLine(ImVec2(cx, cy - Rmax), ImVec2(cx, cy + Rmax), IM_COL32(241, 230, 200, 41), 1.0f);
+    {
+        float dg = Rmax * 0.70710678f;
+        dl->AddLine(ImVec2(cx - dg, cy - dg), ImVec2(cx + dg, cy + dg), IM_COL32(241, 230, 200, 18), 1.0f);
+        dl->AddLine(ImVec2(cx - dg, cy + dg), ImVec2(cx + dg, cy - dg), IM_COL32(241, 230, 200, 18), 1.0f);
+    }
+    // Ticks del bisel: cada 5 grados, mayores cada 30.
+    for (int deg = 0; deg < 360; deg += 5) {
+        float a = (float)deg * NS_PI / 180.0f - NS_PI / 2.0f;
+        float major = deg % 30 == 0;
+        float r1 = R * 0.955f, r2 = r1 - R * (major ? 0.045f : 0.022f);
+        dl->AddLine(ImVec2(cx + cosf(a) * r1, cy + sinf(a) * r1), ImVec2(cx + cosf(a) * r2, cy + sinf(a) * r2),
+                    IM_COL32(201, 162, 75, major ? 230 : 102), major ? 1.6f : 1.0f);
+    }
+    // Letras cardinales (N, E, S, O) sobre el anillo exterior.
+    {
+        ImFont *font = ImGui::GetFont();
+        float rl = R * 0.865f;
+        const char *let[4] = {"N", "E", "S", "O"};
+        float lx[4] = {cx, cx + rl, cx, cx - rl};
+        float ly[4] = {cy - rl, cy, cy + rl, cy};
+        for (int i = 0; i < 4; i++) {
+            ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, let[i]);
+            dl->AddText(font, fs, ImVec2(lx[i] - ts.x * 0.5f, ly[i] - ts.y * 0.5f), NS_BRASS, let[i]);
+        }
+    }
+    // Señales: cada una se ilumina al pasar el barrido, con su eco.
+    for (int n = 0; n < 8; n++) {
+        float b = (kSig[n].b + 4.0f * sinf(t * 0.13f + kSig[n].seed)) * NS_PI / 180.0f;
+        b = fmodf(fmodf(b, NS_TAU) + NS_TAU, NS_TAU);
+        float rf = kSig[n].r * (1.0f + 0.03f * sinf(t * 0.09f + kSig[n].seed * 2.0f));
+        float delta = fmodf(fmodf(sw - b, NS_TAU) + NS_TAU, NS_TAU);
+        float lit = delta < NS_TAU * 0.86f ? powf(1.0f - delta / (NS_TAU * 0.86f), 1.4f) : 0.0f;
+        float rr = Rmax * rf, ba = b - NS_PI / 2.0f;
+        ImVec2 p(cx + cosf(ba) * rr, cy + sinf(ba) * rr);
+        float rad = R * 0.021f;
+        dl->AddCircleFilled(p, rad * 0.57f, IM_COL32(255, 107, 87, 41), 16); // punto tenue, siempre
+        if (lit > 0.01f) {
+            // halo suave: tres círculos grandes y tenues (el port no usa desenfoque de sombra)
+            dl->AddCircleFilled(p, rad * 1.7f, IM_COL32(255, 107, 87, (int)(40.0f * lit)), 16);
+            dl->AddCircleFilled(p, rad * 1.3f, IM_COL32(255, 107, 87, (int)(70.0f * lit)), 16);
+            dl->AddCircleFilled(p, rad, IM_COL32(255, 120, 98, (int)(fminf(1.0f, 0.25f + lit) * 255.0f)), 16);
+            dl->AddCircleFilled(p, rad * 0.4f, IM_COL32(255, 244, 222, (int)(lit * 255.0f)), 16); // núcleo brillante
+        }
+        if (delta < 1.3f) { // eco que se expande al pasar el barrido
+            float q = delta / 1.3f;
+            dl->AddCircle(p, rad * 0.57f + q * R * 0.05f, IM_COL32(255, 176, 46, (int)((1.0f - q) * 191.0f)), 32, 1.5f);
+        }
+    }
+    // Flecha de posición tipo GPS en el centro. Es cóncava (tiene muesca), así que van dos triángulos: AddCircle
+    // rellena el disco entero, y un relleno cóncavo de un solo trazo no se haría bien. El halo es la misma forma
+    // un poco más grande y muy tenue (el port no usa el desenfoque de sombra del HTML).
+    {
+        float as = R * 0.068f;
+        for (int pass = 0; pass < 2; pass++) { /* 0: el halo debajo; 1: la flecha */
+            float k = pass == 0 ? 1.18f : 1.0f;
+            ImU32 c = pass == 0 ? IM_COL32(255, 176, 46, 64) : NS_AMBER;
+            ImVec2 T(cx, cy - as * k), Lm(cx - as * 0.78f * k, cy + as * 0.88f * k), M(cx, cy + as * 0.42f * k),
+                Rm(cx + as * 0.78f * k, cy + as * 0.88f * k);
+            dl->PathClear();
+            dl->PathLineTo(T); dl->PathLineTo(Rm); dl->PathLineTo(M); dl->PathFillConvex(c);
+            dl->PathClear();
+            dl->PathLineTo(T); dl->PathLineTo(M); dl->PathLineTo(Lm); dl->PathFillConvex(c);
+            if (pass == 1) { /* el contorno de los cuatro puntos, como en el HTML */
+                dl->PathClear();
+                dl->PathLineTo(T); dl->PathLineTo(Rm); dl->PathLineTo(M); dl->PathLineTo(Lm);
+                dl->PathStroke(IM_COL32(255, 210, 122, 255), 1.5f, ImDrawFlags_Closed);
+            }
+        }
+    }
+    // Viñeta: negro creciente hacia el borde. Son aros (no círculos rellenos: AddCircleFilled pinta el disco entero
+    // y el centro se volvería negro), de 0.62R al borde.
+    for (int i = 1; i <= 14; i++) {
+        float k = (float)i / 14.0f;
+        dl->AddCircle(ImVec2(cx, cy), R * (0.62f + 0.40f * k), IM_COL32(0, 0, 0, (int)(k * 128.0f)), 64, R * 0.05f);
+    }
+    // Bisel de latón (anillo con degradado cónico) por fuera de la pantalla.
+    {
+        static const float kStop[5][3] = {{230.0f, 203.0f, 125.0f}, {140.0f, 111.0f, 45.0f}, {217.0f, 184.0f, 98.0f},
+                                          {106.0f, 82.0f, 31.0f},  {230.0f, 203.0f, 125.0f}}; /* #e6cb7d #8c6f2d #d9b862 #6a521f */
+        float rb = R * 1.06f, rw = R * 0.06f; /* radio exterior y grosor del bisel */
+        for (int i = 0; i < 48; i++) {
+            float f = (float)i / 48.0f * 4.0f; /* 0..4 a lo largo del degradado */
+            int seg = (int)f;
+            float u = f - (float)seg;
+            ImU32 c = IM_COL32((int)(kStop[seg][0] + (kStop[seg + 1][0] - kStop[seg][0]) * u),
+                               (int)(kStop[seg][1] + (kStop[seg + 1][1] - kStop[seg][1]) * u),
+                               (int)(kStop[seg][2] + (kStop[seg + 1][2] - kStop[seg][2]) * u), 255);
+            float a0 = 210.0f * NS_PI / 180.0f + (float)i / 48.0f * NS_TAU; /* el degradado arranca en 210 grados */
+            dl->PathClear();
+            dl->PathArcTo(ImVec2(cx, cy), rb - rw * 0.5f, a0, a0 + NS_TAU / 48.0f + 0.02f, 6);
+            dl->PathStroke(c, rw, 0);
+        }
+    }
+    dl->AddCircle(ImVec2(cx, cy), R, IM_COL32(27, 22, 8, 255), 64, 2.0f); // aro oscuro interior de la pantalla
+    dl->AddCircle(ImVec2(cx, cy), R * 1.06f, IM_COL32(42, 33, 16, 255), 64, 2.0f); // aro exterior
+}
+
+// La pantalla de conexión: fundido a negro, el radar centrado y la línea de estado debajo.
+static void net_connect_draw(void) {
+    int state = Net_ScreenState();
+    int alpha = Net_ScreenAlpha();
+    int found = Net_ScreenIsFound();
+    float phase = Net_ScreenPhase();
+    ImGuiIO &io = ImGui::GetIO();
+    ImFont *font = ImGui::GetFont();
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+    float cx, cy, R, lim, size;
+    ImVec2 ts, at;
+    char line[64];
+
+    if (state == 0) {
+        return;
+    }
+    dl->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(0, 0, 0, alpha)); // el fundido a negro
+
+    /* El radar solo aparece con la pantalla ya negra del todo (estado 2, "on"): entra despues del fundido y se va
+       antes de que el negro empiece a irse. Es pequeno: un tercio, con tope. */
+    if (state != 2) {
+        return;
+    }
+    lim = fminf(io.DisplaySize.x, io.DisplaySize.y) * 0.5f;
+    R = fminf(lim * 0.28f, 120.0f);
+    if (R < 36.0f) {
+        R = 36.0f;
+    }
+    cx = io.DisplaySize.x * 0.5f;
+    cy = io.DisplaySize.y * 0.5f;
+    net_radar_draw(dl, cx, cy, R, phase);
+
+    // "Opponent Found!" al conectar; si no, buscando con puntos que van en secuencia.
+    size = fminf(fmaxf(15.0f, R * 0.22f), 32.0f);
+    if (found) {
+        snprintf(line, sizeof(line), "Opponent Found!");
+    } else {
+        int k = ((int)(fmodf(phase, 4.0f) * 3.0f)) % 4; /* los puntos van en secuencia: 1, 2, 3 */
+        const char *dots = k == 0 ? "." : k == 1 ? ".." : k == 2 ? "..." : "";
+        snprintf(line, sizeof(line), "Looking for an opponent%s", dots);
+    }
+    ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, line);
+    at = ImVec2(cx - ts.x * 0.5f, cy + R * 1.06f + size * 0.7f);
+    dl->AddText(font, size, at, found ? NS_AMBER : NS_CREAM, line);
 }
 
 static void net_open(void) {
@@ -607,7 +789,9 @@ static void build_net(void) {
             if (state == 2) {
                 Port_LobbyLaunch(); // the other player is there: the game turns into the session at its next blank
                 set_open(false);
-                sNet = false;
+                sNet = false; // (the connecting screen stays up: the handshake takes it from here, gs/net.c)
+            } else if (state <= 0) {
+                Net_ScreenEnd(); // it failed, was cancelled or was given up: the black fades away again
             }
             bool byCode = tab == 0 ? useCode : roomCode[0] != '\0';
             if (state != 0) {
@@ -669,6 +853,7 @@ static void build_net(void) {
                     }
                     Port_NetNameSet(name);
                     lastState = 0;
+                    Net_ScreenBegin(); /* the picture goes black and the sound loops until the two are in step */
                     if (byCode) {
                         Port_LobbyStartCode(tab == 0, roomCode);
                     } else {
@@ -1117,6 +1302,20 @@ static void build(void) {
                                           "Never more than one a frame, which is the most the game counts from any pad.");
                 }
                 ImGui::Separator();
+                {
+                    /* Autosave (plat_autosave.c): the game asks whether to save at the end of a chapter and waits
+                       for an answer; with this on the questions are answered for you and it saves right away,
+                       showing "Auto Saving" while it does. */
+                    bool as = Port_Autosave() != 0;
+                    if (ImGui::Checkbox("Autosave without asking", &as)) {
+                        Port_AutosaveSet(as);
+                    }
+                    ImGui::SetItemTooltip("The game asks \"Save game data?\" at the end of every chapter and waits\n"
+                                          "for an answer. With this on it is answered for you and the save happens\n"
+                                          "right away, showing \"Auto Saving\" while it does.\n"
+                                          "BT3_AUTOSAVE=0 in the environment turns it off for one run.");
+                }
+                ImGui::Separator();
                 controls_tab();
                 ImGui::EndTabItem();
             }
@@ -1323,9 +1522,10 @@ static bool frame_build(void) {
     bool meter = sReady && meter_on();
     // the players' names under the gauges of an online fight
     bool names = sReady && Port_NetActive() && BtlChar_FindByObjId(0) != NULL && (Port_NetName(0)[0] != '\0' || Port_NetName(1)[0] != '\0');
+    bool connect = sReady && Net_ScreenState() != 0; // the connecting screen (net_screen.c): it draws on its own
     meter_count();
     sBuilt = false;
-    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names)) {
+if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !connect)) {
         return false;
     }
     if (sPadHold && sCapKind != 2) { // a binding was taken: the controller works the window again once nothing is held
@@ -1354,6 +1554,9 @@ static bool frame_build(void) {
     }
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    if (connect) {
+        net_connect_draw(); // the fade and the radar, under the online window (its room code stays readable)
+    }
     if (sOpen) {
         if (sNet) {
             build_net();

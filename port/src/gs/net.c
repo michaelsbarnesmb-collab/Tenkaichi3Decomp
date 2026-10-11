@@ -55,6 +55,7 @@ static int sVersionBad; /* the other side answered with another version */
 static const uint32_t kVersion = NET_VERSION;
 #include "net_match.h"
 #include "net_relay.h"
+#include "net_screen.h" /* the connecting screen: the game thread waits below and the picture is black */
 static int sLobbyOther;
 
 /* What the meter shows (ui.cpp): the round trip time, and per second how often the game went back, how far, and
@@ -650,6 +651,7 @@ static void net_start(int role, const char *host, const char *join) {
     t0 = SDL_GetTicksNS();
     while (!sConnected) {
         uint64_t now = SDL_GetTicksNS();
+        Net_ScreenPump(); /* the game draws nothing here (it is stopped in this wait): the screen keeps going */
         if (sMode == 1 && sCodePunchSet && now - last > 100000000ull) {
             uint32_t punch[2] = {MAGIC, T_PUNCH}; /* (room codes: keeps this side's router open for the one who joins) */
             net_send(punch, sizeof(punch), &sCodePunch);
@@ -686,6 +688,7 @@ static void net_start(int role, const char *host, const char *join) {
         int pings = 0;
         while (SDL_GetTicksNS() - start < 400000000ull) {
             uint64_t now = SDL_GetTicksNS();
+            Net_ScreenPump(); /* still setting up: the picture stays black */
             if (pings < 12 && now - lastPing >= 25000000ull) {
                 uint32_t ping[3] = {MAGIC, T_PING, now_ms()};
                 send_to_peer(ping, (int)sizeof(ping));
@@ -702,6 +705,7 @@ static void net_start(int role, const char *host, const char *join) {
         start = SDL_GetTicksNS();
         while (!sCfgAcked && SDL_GetTicksNS() - start < 3000000000ull) {
             uint64_t now = SDL_GetTicksNS();
+            Net_ScreenPump();
             if (now - lastCfg >= 50000000ull) {
                 uint32_t cfg[7 + NAME_LEN / 4] = {MAGIC, T_CONFIG, (uint32_t)sDelay, (uint32_t)sRollMax, NET_VERSION, sRules};
                 memcpy(&cfg[6], sMyName, NAME_LEN);
@@ -715,6 +719,7 @@ static void net_start(int role, const char *host, const char *join) {
     } else {
         uint64_t start = SDL_GetTicksNS();
         while (sCfgGot != 2 && SDL_GetTicksNS() - start < 5000000000ull) {
+            Net_ScreenPump(); /* waiting for the host's choices: the picture stays black */
             receive();
             SDL_Delay(1);
         }
@@ -745,6 +750,8 @@ static void net_start(int role, const char *host, const char *join) {
     if (sRollMax > 0) {
         fprintf(stderr, "bt3: net: rollback of up to %d blanks\n", sRollMax);
     }
+    Net_ScreenFound();   /* the two games are in step: the connecting screen says so for a moment */
+    Net_ScreenHoldFound(); /* ...and that moment is held here: the game draws nothing until the session's start-up */
 }
 
 int Port_NetActive(void);
@@ -1182,6 +1189,7 @@ void Port_NetSessionBegin(int role, const char *address, int port) {
 }
 
 void Port_NetSessionEnd(void) {
+    Net_ScreenEnd(); /* (the session is over: nothing is left to wait for, the black must not stay) */
     Relay_Close(sSock);
     if (sSock >= 0) {
         closesocket(sSock);
@@ -1199,6 +1207,9 @@ int Port_NetWarp(void) {
 }
 void Port_NetArrived(void) {
     sArrived = 1;
+    /* The game is drawing again: the character select comes out of the black (the screen fades away over the
+       next frames, which are the first ones shown since the connection was made). */
+    Net_ScreenEnd();
 }
 
 /* The session is over (the game went back to the main menu, or the other side is gone): back to the game as it

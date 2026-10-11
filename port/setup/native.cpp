@@ -221,7 +221,7 @@ void copy_out(Iso &iso, Uint64 offset, Uint64 size, const std::string &path, std
 }
 
 void step_disc(Iso &iso, const std::string &path) {
-    say("@step 1 3 Disc image");
+    say("@step 1 4 Disc image");
     iso.open(path);
     const IsoFile *slus = iso.find("SLUS_216.78"), *dbzp = iso.find("BIN/DBZP.BIN");
     if (slus == NULL || dbzp == NULL) {
@@ -259,7 +259,7 @@ void step_disc(Iso &iso, const std::string &path) {
 void step_data(Iso &iso, const std::string &root) {
     std::string data = root + "gamedata/", marker = data + ".installed";
     SDL_PathInfo info;
-    say("@step 2 3 Game data");
+    say("@step 2 4 Game data");
     if (SDL_GetPathInfo(marker.c_str(), &info)) {
         say("@skip already unpacked");
         return;
@@ -332,10 +332,301 @@ void step_data(Iso &iso, const std::string &root) {
     say(line);
 }
 
+// ------------------------------------------------------------------------------ the save-file dialogs
+
+// The game's save dialogs say a memory card has to be inserted, formatted, or has no space left. On a PC there
+// is no card, so they are rewritten to talk about the save file instead. The result goes to gamedata/mods/,
+// which the game prefers over the disc's copy (port/src/plat_fcache.c); nothing is written over the original.
+//
+// The texts are found by their place in the list of the texts that mention the card, which is the same 31 in
+// the same order in every file that has them. That is why neither this file nor port/tools/patch_texts.py (the
+// same job for a source checkout) carries a single word of the game's own dialogs: only the 31 that go in.
+static const char *kNewTexts[] = {
+    "",                                                                             // the three slot names: the dialog draws no title
+    "",
+    "",
+    "Checking Save File",
+    "Save file not found.\nProgress will not be saved.\nContinue anyway?",
+    "Not enough free space.\nAt least 61 KB is required.\nContinue anyway?",
+    "Do you wish to create a save file?",
+    "Auto Saving",
+    "Save game data?",
+    "Auto Saving",
+    "Save failed.\nPlease try again.",
+    "Loading data.",
+    "Load failed.\nPlease try again.",
+    "",                                                                             // the unformatted-card prompt, which should not come up
+    "Formatting save file.",
+    "Format failed!\nPlease try again.",
+    "No save file found.",
+    "Game data not found.",
+    "Load failed.\nData may be corrupt.",
+    "Not enough free space.\nAt least 61 KB is required.",
+    "Checking Save File",
+    "No replay data found.\nAt least 160 KB is required.\nContinue anyway?",
+    "Not enough free space.\nAt least 160 KB is required.\nContinue anyway?",
+    "Create Replay data?",
+    "Auto Saving",
+    "Save replay data?",
+    "Auto Saving",
+    "Replay data save failed.\nPlease try again.",
+    "Loading replay data.",
+    "Replay data load failed.\nPlease try again.",
+    "Not enough free space.\nAt least 160 KB is required.",
+};
+const int kTextCount = (int)(sizeof(kNewTexts) / sizeof(kNewTexts[0]));
+const char *kTextFiles[] = {"00448", "00449", "00453", "00460", "00472", "00473"};
+
+struct Section { int index; size_t off; };
+
+static Uint32 rd32(const std::vector<Uint8> &d, size_t at) {
+    return (Uint32)d[at] | ((Uint32)d[at + 1] << 8) | ((Uint32)d[at + 2] << 16) | ((Uint32)d[at + 3] << 24);
+}
+static void wr32(std::vector<Uint8> &d, size_t at, Uint32 v) {
+    d[at] = (Uint8)v; d[at + 1] = (Uint8)(v >> 8); d[at + 2] = (Uint8)(v >> 16); d[at + 3] = (Uint8)(v >> 24);
+}
+static size_t part(const std::vector<Uint8> &d, int i) { return (size_t)((rd32(d, (size_t)i * 4) >> 2) << 2); }
+
+/* The file's sections: the first words are their offsets, and they come in order. The running offset is kept
+   signed on purpose: the first section's predecessor is "none", and comparing that as an unsigned size would
+   wrap round to the largest one and stop the walk on its first step. */
+static std::vector<Section> sections(const std::vector<Uint8> &d) {
+    std::vector<Section> out;
+    long prev = -1;
+    for (int i = 0; i < 80; i++) {
+        if ((size_t)i * 4 + 4 > d.size()) break;
+        long o = (long)part(d, i);
+        if (!(o > prev && o >= 0 && (size_t)o < d.size())) break;
+        out.push_back({i, (size_t)o});
+        prev = o;
+    }
+    return out;
+}
+
+/* The game's BPE decoder (src/sys/bpe.c), the same expansion the file loader does. */
+static bool bpe_decode(const std::vector<Uint8> &d, size_t off, std::vector<Uint8> &out, Uint32 &declared) {
+    if (off + 8 > d.size()) return false;
+    Uint32 size = rd32(d, off), packed = rd32(d, off + 4);
+    declared = size;
+    size_t p = off + 8, end = p + packed;
+    if (end > d.size()) return false;
+    out.clear();
+    Uint8 left[256], right[256], stack[256];
+    while (p < end) {
+        int count = d[p++];
+        for (int i = 0; i < 256; i++) left[i] = (Uint8)i;
+        int c = 0;
+        for (;;) {
+            if (count > 127) { c += count - 127; count = 0; }
+            // c == 256 is the table filled up, which ends the reading of it; anything past that means these
+            // bytes are not a BPE table at all (the file has sections that are plain data), and the caller
+            // moves on to the next one
+            if (c > 256) return false;
+            if (c == 256) break;
+            int i = 0;
+            do {
+                if (p >= end || c >= 256) return false;
+                left[c] = d[p++];
+                if (c != left[c]) { if (p >= end) return false; right[c] = d[p++]; }
+                i++; c++;
+            } while (i <= count);
+            if (c == 256) break;
+            if (p >= end) return false;
+            count = d[p++];
+        }
+        if (p + 1 >= end) return false;
+        // the size of the block comes first with its high byte, as bpeenc writes it and src/sys/bpe.c reads it
+        Uint32 blocksize = (Uint32)d[p + 1] + ((Uint32)d[p] << 8);
+        p += 2;
+        int i = 0;
+        for (;;) {
+            int sym;
+            if (i != 0) { i--; sym = stack[i]; }
+            else {
+                if (blocksize == 0) break;
+                blocksize--;
+                if (p >= end) return false;
+                sym = d[p++];
+            }
+            if (sym == left[sym]) out.push_back((Uint8)sym);
+            else {
+                if ((size_t)i + 1 >= sizeof(stack)) return false;
+                stack[i++] = right[sym];
+                stack[i++] = left[sym];
+            }
+        }
+    }
+    return true;
+}
+
+/* The same format from an encoder that only writes literals: the table is the identity, so every byte stands
+   for itself and the decoder above reproduces it exactly. It is larger than what it replaces, which is why
+   the sections after it have to move along. blockSize is 16 bits, so it is written in pieces. */
+static std::vector<Uint8> bpe_encode_literal(const std::vector<Uint8> &plain) {
+    std::vector<Uint8> body;
+    for (size_t off = 0; off < plain.size(); off += 65535) {
+        size_t n = plain.size() - off < 65535 ? plain.size() - off : 65535;
+        body.push_back(255);              // count > 127: skip 128 symbols of the identity table
+        body.push_back(128);              // left[128] = 128, which equals itself, so no right byte
+        body.push_back(126);              // count, which fills c = 129..255
+        for (int c = 129; c < 256; c++) body.push_back((Uint8)c);
+        body.push_back((Uint8)(n >> 8));  // blockSize
+        body.push_back((Uint8)(n & 0xFF));
+        body.insert(body.end(), plain.begin() + off, plain.begin() + off + n);
+    }
+    std::vector<Uint8> out;
+    out.insert(out.end(), {(Uint8)(plain.size() & 0xFF), (Uint8)((plain.size() >> 8) & 0xFF),
+                           (Uint8)((plain.size() >> 16) & 0xFF), (Uint8)((plain.size() >> 24) & 0xFF),
+                           (Uint8)(body.size() & 0xFF), (Uint8)((body.size() >> 8) & 0xFF),
+                           (Uint8)((body.size() >> 16) & 0xFF), (Uint8)((body.size() >> 24) & 0xFF)});
+    out.insert(out.end(), body.begin(), body.end());
+    return out;
+}
+
+/* One text of a decompressed section: where it is, and whether it is one of the dialogs about the card. */
+struct Spot { size_t start, end; bool card; std::string text; };
+
+static std::vector<Spot> texts(const std::vector<Uint8> &buf) {
+    std::vector<Spot> out;
+    size_t i = 0;
+    while (i + 5 < buf.size()) {
+        if (buf[i] != 0xFF || buf[i + 1] != 0xFE) { i += 2; continue; }
+        std::string s;
+        size_t p = i + 2;
+        for (;;) {
+            if (p + 1 >= buf.size()) break;
+            Uint16 ch = (Uint16)(buf[p] | (buf[p + 1] << 8));
+            p += 2;
+            if (ch == 0) break;
+            if (ch == 0xFEFF) continue;          // the byte-order mark each line of the game carries
+            s += ch == 10 ? '\n' : ch < 128 ? (char)ch : '?';
+        }
+        while (!s.empty() && (s.front() == ' ' || s.front() == '\n')) s.erase(s.begin());
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\n')) s.pop_back();
+        if (!s.empty()) {
+            // two of the texts spell it across a line break ("memory \ncard"), so every run of white space is
+            // made one space before looking, the way a search over the text would see it
+            std::string flat;
+            for (size_t k = 0; k < s.size(); k++) {
+                char c = (char)tolower((unsigned char)s[k]);
+                if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+                if (c == ' ' && !flat.empty() && flat.back() == ' ') continue;
+                flat += c;
+            }
+            out.push_back({i, p, flat.find("memory card") != std::string::npos, s});
+        }
+        i = p;
+    }
+    return out;
+}
+
+/* One of these files, rewritten: its section decoded, the 31 texts replaced, compressed again and put back with
+   the sections after it moved along. Empty when the file is not one of these. */
+static std::vector<Uint8> patch_file(const std::vector<Uint8> &original, int &sectionOut) {
+    std::vector<Uint8> plain, out;
+    Uint32 declared = 0;
+    int found = -1;
+    for (const Section &s : sections(original)) {
+        if (!bpe_decode(original, s.off, plain, declared) || plain.size() != declared) continue;
+        int n = 0;
+        for (const Spot &t : texts(plain)) n += t.card;
+        if (n != kTextCount) continue;
+        if (found >= 0) return std::vector<Uint8>();   // two of them: not a file we know how to read
+        found = s.index;
+    }
+    if (found < 0) return std::vector<Uint8>();
+    for (const Section &s : sections(original)) {
+        if (s.index != found) continue;
+        if (!bpe_decode(original, s.off, plain, declared)) return std::vector<Uint8>();
+    }
+    std::vector<Spot> spots = texts(plain);
+    std::vector<Spot> cards;
+    for (const Spot &t : spots) if (t.card) cards.push_back(t);
+    if ((int)cards.size() != kTextCount) return std::vector<Uint8>();
+    for (int k = 0; k < kTextCount; k++) {
+        size_t start = cards[k].start, room = cards[k].end - start;
+        std::string text = kNewTexts[k];
+        text += '\0';                            // UTF-16 as the game stores it: ASCII, \n kept as 10
+        if (text.size() * 2 + 2 > room) return std::vector<Uint8>();   // every new text is shorter; this says otherwise
+        size_t at = start + 2;
+        for (size_t j = 0; j < text.size(); j++) plain[at + j * 2] = (Uint8)text[j];
+        for (size_t j = at + text.size() * 2; j < cards[k].end; j++) plain[j] = 0;
+    }
+    std::vector<Uint8> enc = bpe_encode_literal(plain);
+    size_t off = part(original, found), tail = original.size();
+    for (const Section &s : sections(original)) if (s.off > off && s.off < tail) tail = s.off;
+    long delta = (long)enc.size() - (long)(tail - off);
+    out.insert(out.end(), original.begin(), original.begin() + off);
+    out.insert(out.end(), enc.begin(), enc.end());
+    out.insert(out.end(), original.begin() + tail, original.end());
+    for (const Section &s : sections(original)) {
+        if (s.off > off) wr32(out, (size_t)s.index * 4, (Uint32)((((long)s.off + delta) >> 2) << 2));
+    }
+    // read it back the way the game will: the section has to decode, and nothing may still mention the card
+    if (!bpe_decode(out, part(out, found), plain, declared) || plain.size() != declared) return std::vector<Uint8>();
+    for (const Spot &t : texts(plain)) if (t.card) return std::vector<Uint8>();
+    sectionOut = found;
+    return out;
+}
+
+void step_texts(const std::string &root) {
+    std::string data = root + "gamedata/", out = data + "mods/pzs3us1/";
+    SDL_PathInfo info;
+    say("@step 3 4 Save-file texts");
+    if (SDL_GetPathInfo((out + "00473.bin").c_str(), &info)) {
+        say("@skip already rewritten");
+        return;
+    }
+    if (!SDL_GetPathInfo((data + "pzs3us1").c_str(), &info)) {
+        say("@skip no game data");
+        return;
+    }
+    int files = 0;
+    for (const char *name : kTextFiles) {
+        size_t size = 0;
+        char *raw = (char *)SDL_LoadFile((data + "pzs3us1/" + name + ".bin").c_str(), &size);
+        if (raw == NULL) continue;
+        std::vector<Uint8> original(raw, raw + size);
+        SDL_free(raw);
+        int section = -1;
+        std::vector<Uint8> patched = patch_file(original, section);
+        if (patched.empty()) {
+            throw Stop{std::string("The file ") + name + ".bin of the game data is not one this setup knows how to"
+                                   " read, so its save-file texts were left as the disc has them.\n"
+                                   "The game will still work; its dialogs will keep talking about the card."};
+        }
+        std::string path = out + name + ".bin";
+        SDL_CreateDirectory(out.c_str());
+        SDL_IOStream *f = SDL_IOFromFile(path.c_str(), "wb");
+        if (f == NULL || !SDL_WriteIO(f, patched.data(), patched.size())) {
+            if (f != NULL) SDL_CloseIO(f);
+            throw Stop{"The rewritten game file could not be written:\n" + path};
+        }
+        SDL_CloseIO(f);
+        files++;
+    }
+    if (files == 0) {
+        throw Stop{"None of the game files with the save-file texts were found in gamedata/pzs3us1/."};
+    }
+    // The list the game reads to know which files the setup put in mods/, so they are not counted as game
+    // data the player changed (port/src/plat_verify.c).
+    SDL_IOStream *list = SDL_IOFromFile((out + "installed.txt").c_str(), "wb");
+    if (list != NULL) {
+        for (const char *name : kTextFiles) {
+            std::string line = std::string("pzs3us1/") + name + ".bin\n";
+            SDL_WriteIO(list, line.data(), line.size());
+        }
+        SDL_CloseIO(list);
+    }
+    char line[128];
+    snprintf(line, sizeof(line), "@ok %d files, in gamedata/mods/", files);
+    say(line);
+}
+
 void step_test(const std::string &root) {
     std::string exe = root + kGame, saves = root + "gamedata/.selftest";
     const char *args[2] = {exe.c_str(), NULL};
-    say("@step 3 3 Self-test");
+    say("@step 4 4 Self-test");
     say("@note the game's demo fight, no window");
     SDL_Environment *env = SDL_CreateEnvironment(true);
     SDL_SetEnvironmentVariable(env, "BT3_DEMO", "1", true);
@@ -406,6 +697,8 @@ void work(std::string root, std::string path) {
         step_disc(iso, path);
         check_cancel();
         step_data(iso, root);
+        check_cancel();
+        step_texts(root);
         check_cancel();
         step_test(root);
         say("@done " + root + kGame);
