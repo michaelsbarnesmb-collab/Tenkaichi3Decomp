@@ -1112,10 +1112,48 @@ static void gl_target_copy(int src, int dst) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
+/* Present a black frame plus the overlay, with no frame of the game's: the game thread is stopped waiting for the
+   network (net_screen.c: the connecting screen). The same events the frame's own pass reads are read here. */
+static void gl_idle_frame(void) {
+    SDL_Event ev;
+    int sw, sh;
+
+    if (sWindow == NULL || sCtx == NULL) {
+        return;
+    }
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_EVENT_QUIT) {
+            exit(0);
+        }
+        if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.key == SDLK_F1) {
+            Ui_Toggle();
+            continue;
+        }
+        Ui_Event(&ev);
+    }
+    SDL_GetWindowSizeInPixels(sWindow, &sw, &sh);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, sw, sh);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    {
+        extern volatile int gUiPresentX, gUiPresentY, gUiPresentW, gUiPresentH;
+        gUiPresentX = 0;
+        gUiPresentY = 0;
+        gUiPresentW = sw;
+        gUiPresentH = sh;
+    }
+    Ui_DrawGL();
+    SDL_GL_SwapWindow(sWindow);
+}
+
 GsBackend sGlBackend = {
     "opengl",
     gl_init,
     frame_end,
+    gl_idle_frame,
     scale_changed,
     white_tex,
     tex_create,

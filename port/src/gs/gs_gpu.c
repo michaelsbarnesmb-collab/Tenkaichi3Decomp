@@ -1200,10 +1200,60 @@ static void vk_target_copy(int src, int dst) {
     SDL_SubmitGPUCommandBuffer(cmd);
 }
 
+/* Present a black frame plus the overlay, with no frame of the game's: the game thread is stopped waiting for the
+   network (net_screen.c: the connecting screen). The same events the frame's own pass reads are read here, so the
+   window stays alive and Esc / F1 still work while the game is not drawing. */
+static void vk_idle_frame(void) {
+    SDL_GPUCommandBuffer *cmd;
+    SDL_GPUColorTargetInfo ti;
+    SDL_GPURenderPass *pass;
+    SDL_GPUTexture *swap = NULL;
+    SDL_Event ev;
+    Uint32 sw = 0, sh = 0;
+
+    if (sDev == NULL || sWindow == NULL) {
+        return;
+    }
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_EVENT_QUIT) {
+            exit(0);
+        }
+        if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat && ev.key.key == SDLK_F1) {
+            Ui_Toggle();
+            continue;
+        }
+        Ui_Event(&ev);
+    }
+    cmd = SDL_AcquireGPUCommandBuffer(sDev);
+    if (cmd == NULL) {
+        return;
+    }
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd, sWindow, &swap, &sw, &sh) || swap == NULL) {
+        SDL_SubmitGPUCommandBuffer(cmd);
+        return;
+    }
+    SDL_zero(ti);
+    ti.texture = swap;
+    ti.load_op = SDL_GPU_LOADOP_CLEAR;
+    ti.clear_color.a = 1.0f;
+    ti.store_op = SDL_GPU_STOREOP_STORE;
+    gUiPresentX = 0;
+    gUiPresentY = 0;
+    gUiPresentW = (int)sw;
+    gUiPresentH = (int)sh;
+    pass = SDL_BeginGPURenderPass(cmd, &ti, 1, NULL);
+    if (pass != NULL) {
+        SDL_EndGPURenderPass(pass);
+    }
+    Ui_Draw(cmd, swap);
+    SDL_SubmitGPUCommandBuffer(cmd);
+}
+
 GsBackend sVulkanBackend = {
     "vulkan",
     vk_init,
     vk_frame_end,
+    vk_idle_frame,
     scale_changed,
     white_tex,
     tex_create,

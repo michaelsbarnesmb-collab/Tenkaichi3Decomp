@@ -1454,3 +1454,38 @@ was, and there is no way back from the controller yet (the user bound SELECT alo
 
 Checked by the user on screen (Linux): START + SELECT opens and closes it, pressed together. Not checked by
 anyone: Windows; a second controller; the online screen with a controller.
+
+## The wait while an online match is set up (2026-10-11)
+
+- What was shown while the two games got in touch: the lobby window alone while the other player was being found
+  (the game keeps drawing behind it), and then nothing at all — `net_start` stops the game thread in
+  `while (!sConnected)` (net.c) waiting for the greeting, and the renderer only presents from the game thread, so
+  the screen froze on the last frame of the menu for up to two minutes, then for the setup exchange on top.
+- Now the picture fades to black over 300 ms and a "Connecting..." line pulses over it until the match is ready;
+  the black fades away again over 450 ms once the game draws the versus menu (`Port_NetArrived`). The fade is a
+  translucent rect drawn by the overlay (ui.cpp: `net_connect_draw`, called from `frame_build`), and it is drawn
+  *before* the online window, so while the lobby is up the window with the room code stays readable on top.
+- During the handshake the game still draws nothing, so `net_screen.c`'s `Net_ScreenPump()` presents a black frame
+  plus the overlay from inside that wait and advances the fade on its own clock: a new back-end call
+  `GsBackend.idleFrame` (black frame + `Ui_Draw` on Vulkan, clear + `Ui_DrawGL` + swap on OpenGL), reached through
+  `Gs_PresentIdle`. It is paced to ~60 a second, so `net.c` can call it every iteration of each wait loop.
+- The sound underneath is `net.wav` in the "sounds" folder (`BT3_SOUNDS`, or `BT3_DATA`/`gamedata`/`sounds` — the
+  same place the added stages and songs are looked for), or whatever `BT3_NET_SOUND` names. Anything SDL's
+  `SDL_LoadWAV` reads will do (WAV; convert an mp3 once with ffmpeg). It is one more `SDL_AudioStream` on the
+  game's own device, fed from SDL's audio thread like every other stream, so it keeps playing while the game thread
+  is stopped waiting — which is the point of it. `BT3_NET_SOUND_LOG=1` says which file was chosen.
+- What is drawn over the black is a radar, ported from an HTML canvas the user wrote (radar-buscatesoros.html): the
+  port has no browser, so `ui.cpp`'s `net_radar_draw` redraws it with ImGui's primitives — brass bezel with a
+  conic gradient (48 stroked arcs), four rings, the axes and their diagonals, a tick every 5 degrees (major every
+  30), N/E/S/O, the eight signals with the sweep lighting them and their expanding echo, the amber GPS arrow in the
+  middle and the vignette. Three things the canvas does that ImGui does not, each with its own way round:
+    - radial gradients have no primitive, so the screen's #0f1b24→#070b12 is 20 nested filled circles (largest
+      first) and the vignette is 14 *rings*, not filled circles: AddCircleFilled paints the whole disc, so filled
+      circles for the vignette would black out the centre;
+    - the shadow blur of the lit signals and of the arrow is circles of growing size and low alpha;
+    - the arrow is concave (it has a notch), and a convex fill triangulates that wrong, so it is two triangles.
+  Under the radar, centred, "Looking for an opponent" with its dots going 1, 2, 3 in sequence; when the two games
+  are in step it reads "Opponent Found!" in amber for 1.4 s and only then does the black fade. That moment has to
+  be held where it is: the session's start-up runs ahead without picture (`Port_NetWarp`), so nothing would draw it
+  — `Net_ScreenFound` (net.c, at the end of net_start) then `Net_ScreenHoldFound`, which keeps presenting while
+  the radar keeps turning, before the game is let go.

@@ -60,6 +60,9 @@ static int slot_of(const char *rel) {
         fprintf(stderr, "bt3: file not found: %s\n", path);
         return -1;
     }
+    if (getenv("BT3_FILE_LOG") != NULL) { /* which file of the data this is, and which one it came from */
+        fprintf(stderr, "bt3: file: %s  <- %s\n", rel, path);
+    }
     for (i = 0; i < SLOTS; i++) {
         if (sSlot[i].fp == NULL) {
             old = i;

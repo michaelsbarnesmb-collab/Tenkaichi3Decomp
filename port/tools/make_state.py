@@ -34,7 +34,14 @@ def is_game(obj):
 
 def main():
     text = pathlib.Path(str(EXE) + ".map").read_text(errors="replace")
-    text = text[text.index("Linker script and memory map"):]
+    # The heading before the section list: "Linker script and memory map" in English, the Spanish of a localised
+    # GNU ld otherwise. Either will do; a map with neither is a problem worth seeing rather than a crash here.
+    for heading in ("Linker script and memory map", "Guión del enlazador y mapa de memoria"):
+        if heading in text:
+            text = text[text.index(heading):]
+            break
+    else:
+        text = ""
     out = None
     ranges = []
     others = []
