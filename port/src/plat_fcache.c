@@ -22,18 +22,21 @@ static unsigned long sClock;
 static volatile int sLock;
 
 /* Opens the host file the game gets for `rel` (its path under the data root) and says which it is: a stage or a
-   song added from outside the disc (the stage / song list names the file), else the file under mods/, else the
+   song added from outside the disc (the stage / song list names the file) or a file of an added character
+   (plat_chars.c), else the file under mods/, else the
    original. NULL if there is none; `path` then holds the last place looked at. This is the ONE place that
    decides which file is loaded: the gameplay fingerprint (plat_fprint.c) hashes what this opens. */
 FILE *Port_FileOpenHost(const char *rel, char *path, size_t n) {
     extern int PortStages_Alias(const char *rel, char *out, unsigned n); /* plat_stages.c */
     extern int PortSongs_Alias(const char *rel, char *out, unsigned n);  /* plat_songs.c: the same for a song */
+    extern int PortChars_Alias(const char *rel, char *out, unsigned n);  /* plat_chars.c: for an added character */
     char target[256];
     FILE *fp = NULL;
 
     /* a stage added from outside the disc: the game asks for a file id past the disc's own, and the file is
        the one the stage list names (plat_stages.c), under the data folder */
-    if (PortStages_Alias(rel, target, (unsigned)sizeof(target)) || PortSongs_Alias(rel, target, (unsigned)sizeof(target))) {
+    if (PortStages_Alias(rel, target, (unsigned)sizeof(target)) || PortSongs_Alias(rel, target, (unsigned)sizeof(target)) ||
+        PortChars_Alias(rel, target, (unsigned)sizeof(target))) {
         snprintf(path, n, "%s", target); /* as it is (the stages / songs folder), or in the data */
         fp = fopen(path, "rb");
         if (fp == NULL) {

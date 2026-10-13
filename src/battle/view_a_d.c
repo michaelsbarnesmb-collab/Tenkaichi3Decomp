@@ -5,6 +5,9 @@
 #include "sys/fade.h"
 #include "sys/file.h"
 #include "sys/heap.h"
+#ifdef PORT
+#include "plat_chars.h" /* characters added past the original's 161 */
+#endif
 
 /*
  * ChrView, 0x25D468..0x25DE68: the character model viewer of the menus. It runs the battle's object, stage and
@@ -86,6 +89,11 @@ ChrView *gChrView = NULL;
 
 /* File id of a character's model: costume n, or its damaged version. */
 s32 ChrView_GetModelFile(s32 chara, s32 costume, s32 damaged) {
+#ifdef PORT
+    if (Port_CharaAdded(chara)) {
+        return Port_CharaFile(0, chara, PORT_CHARA_MODEL + costume + (damaged != 0 ? 4 : 0));
+    }
+#endif
     if (damaged != 0) {
         return chara * 10 + costume + (CHRVIEW_FILE_FIRST + 4);
     }
@@ -95,9 +103,16 @@ s32 ChrView_GetModelFile(s32 chara, s32 costume, s32 damaged) {
 /* The character's entry in the table of common file 4, NULL for an id that is not a character. */
 ChrViewInfo *ChrView_GetCharaInfo(u32 chara) {
     ChrViewInfo *table = PACK_AT(gCommonRes->data[2], 1);
+#ifdef PORT
+    table = Port_ChrTblSection(gCommonRes->data[2], table);
+    if (chara >= CHRVIEW_CHARA_COUNT && !Port_CharaAdded(chara)) {
+        return NULL;
+    }
+#else
     if (chara >= CHRVIEW_CHARA_COUNT) {
         return NULL;
     }
+#endif
     return &table[chara];
 }
 

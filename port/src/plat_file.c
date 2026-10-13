@@ -58,6 +58,12 @@ static const char *alias_target(const char *rel) {
     if (PortSongs_Alias(rel, buf, sizeof(buf))) {
         return buf;
     }
+    {
+        extern int PortChars_Alias(const char *rel, char *out, unsigned n); /* plat_chars.c */
+        if (PortChars_Alias(rel, buf, sizeof(buf))) {
+            return buf;
+        }
+    }
     if (list == NULL) {
         return NULL;
     }

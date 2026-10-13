@@ -7,6 +7,9 @@
 #include "sys/common.h"
 #include "sys/heap.h"
 #include "sys/save.h"
+#ifdef PORT
+#include "plat_chars.h" /* characters added past the original's 161 */
+#endif
 
 /*
  * Fighter manager, 0x1C0058..0x1C2FF0: the roster (gBtlChars), the per-fighter reset and the whole-roster
@@ -1293,7 +1296,11 @@ void BtlChar_AllocAll(s32 count) {
     gBtlChars->tbl[1] = FILE_TABLE(gCommonRes->data[0], 5);
     gBtlChars->tbl[2] = FILE_TABLE(gCommonRes->data[0], 6);
     gBtlChars->tbl[3] = FILE_TABLE(gCommonRes->data[0], 7);
+#ifdef PORT
+    gBtlChars->tbl[4] = Port_ParamTbl(FILE_TABLE(gCommonRes->data[0], 8)); /* (with room for added characters) */
+#else
     gBtlChars->tbl[4] = FILE_TABLE(gCommonRes->data[0], 8);
+#endif
     gBtlChars->tbl[5] = FILE_TABLE(gCommonRes->data[0], 9);
     BtlChar_ResetAll();
     BtlCharSnd_Init();

@@ -2,6 +2,9 @@
 #include "battle/hud_0.h"
 #include "battle/battle.h"
 #include "sys/pad.h"
+#ifdef PORT
+extern void *memcpy(void *dst, const void *src, u32 n);
+#endif
 
 /*
  * Battle pause menu, part 1. Source range 0x2129C8-0x213238.
@@ -311,11 +314,51 @@ static void PauseMenu_PortRemove(BtlMenu *menu, s32 id) {
         }
     }
 }
+
+#include "battle/battle_setup.h"
+#include "plat_chars.h"
+
+/* A battle with a character added past the original's (port/src/plat_chars.c) does not offer to save its replay
+   ("Save Replay Data", id 0x17): a copy of the game without that character could not play it. The menus are the
+   game's own data, changed in place: they are put back as they were for every other battle. */
+static void PauseMenu_PortReplaySave(void) {
+    static BtlMenu *menus[4] = { &gPauseMenuVersus, &gPauseMenuReplayRec, &gPauseMenuResultVersus, &gPauseMenuResultReplayRec };
+    static BtlMenuItem saved[4][16];
+    static s32 savedCount[4] = { -1, -1, -1, -1 };
+    s32 added = 0;
+    s32 side;
+    s32 i;
+
+    for (side = 0; side < 2; side++) {
+        for (i = 0; i < BattleSide_GetMemberCount(side); i++) {
+            added |= Port_CharaAdded(BattleSide_GetMember(side, i)->chara);
+        }
+    }
+    for (i = 0; i < 4; i++) {
+        if (savedCount[i] < 0 && menus[i]->count <= 16) {
+            savedCount[i] = menus[i]->count;
+            memcpy(saved[i], menus[i]->items, menus[i]->count * sizeof(BtlMenuItem));
+        }
+        if (savedCount[i] >= 0) {
+            menus[i]->count = savedCount[i];
+            memcpy(menus[i]->items, saved[i], savedCount[i] * sizeof(BtlMenuItem));
+        }
+        if (added) {
+            PauseMenu_PortRemove(menus[i], 0x17);
+        }
+    }
+}
 #endif
 
 /* Battle start: allocates the menu work. */
 void PauseMenu_Init(void) {
 #ifdef PORT
+    {
+        extern int Port_NetActive(void);
+        if (!Port_NetActive()) { /* (online: the entries taken out below stay out; no added characters there) */
+            PauseMenu_PortReplaySave();
+        }
+    }
     {
         /* Online the menu at the end of a battle does without three of its six entries (asked for by the user):
            "Return to Vs Menu" (id 0xE; a session has no versus menu, the host sets the rules in the lobby window),

@@ -209,7 +209,14 @@ def name_sheets(res, part):
     return sheets
 
 
+CHARS = None  # --chars=<c>,<c>...: only these of the added characters (default: all)
+
+
 def main():
+    global CHARS
+    for a in [a for a in sys.argv[1:] if a.startswith("--chars=")]:
+        CHARS = a[len("--chars="):]
+        sys.argv.remove(a)
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     iso = Iso(sys.argv[1])
@@ -389,6 +396,29 @@ def main():
                                      "".join(line + "\n" for line in listing))
     (songs / "names.rgba").write_bytes(struct.pack("<III", 512, 32, 2 * len(rows)) + b"".join(rows) + b"".join(lit_rows))
     print(f"  music: {len(listing)} tracks with their names -> {songs}")
+    # the characters the patch adds (port/tools/slus21978_chars.py); their names: part 43 of the same resources, a
+    # pack of UTF-16 lines, line c the name of character c
+    import slus21978_chars
+    toc3 = {name: (iso.find("DATA/" + name.upper()), toc[name]) for name in toc}
+
+    def read(fid):
+        name, index = (("pzs4us1.afs", fid - 1) if fid < 0xD48 else ("pzs4us2.afs", fid - 0xD48) if fid < 0x10CC0 else
+                       ("pzs4us0.afs", fid - 0x10CC0) if fid < 0x20000 else ("pzs4us3.afs", fid - 0x20000))
+        (lba, _), files = toc3[name]
+        offset, sectors = files[index]
+        iso.f.seek(lba * SECTOR + offset)
+        return iso.f.read(sectors * SECTOR)
+
+    text = pack_at(res, 43)
+    names = {}
+    for c in range(struct.unpack_from("<I", res, text)[0]):
+        p = text + (struct.unpack_from("<I", res, text + 4 * (c + 1))[0] >> 2 << 2)
+        end = p
+        while struct.unpack_from("<H", res, end)[0]:
+            end += 2
+        names[c] = res[p:end].decode("utf-16-le").lstrip("\ufeff")
+    which = [int(c) for c in CHARS.split(",")] if CHARS else None
+    print(f"  characters: {slus21978_chars.extract(read, bpe_decode, data, names, which)} -> {data / 'slus21978' / 'chars'}")
     (data / "slus21978" / "source.txt").write_text(
         "The patch SLUS-21978: Spanish (Latin America) voices and music\n" +
         "".join(f"character {c} = {m}\n" for c, m in sorted(moved.items())))

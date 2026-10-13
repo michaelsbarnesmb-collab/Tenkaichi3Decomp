@@ -2,6 +2,9 @@
 #include "battle/view_b.h"
 #include "sys/common.h"
 #include "sys/save.h"
+#ifdef PORT
+#include "plat_chars.h" /* characters added past the original's 161 */
+#endif
 
 /*
  * ChrTbl / ItemSet, 0x260D20..0x2614B0: readers of the two tables of common file 4 (gCommonRes->data[2]): the
@@ -14,7 +17,12 @@ extern void *memset(void *dst, s32 c, u32 n);
 
 /* A section of common file 4. */
 #define CHRTBL_FILE ((ChrTblFile *)gCommonRes->data[2])
+#ifdef PORT
+/* (the characters' part: the port's copy, with room for added characters) */
+#define CHRTBL_SECTION(file, ofs) ((u8 *)Port_ChrTblSection((file), (u8 *)(file) + (((file)->ofs >> 2) << 2)))
+#else
 #define CHRTBL_SECTION(file, ofs) ((u8 *)(file) + (((file)->ofs >> 2) << 2))
+#endif
 
 /* Returns the character's number of costumes, and sets *costume to 0 if it is not one of them. */
 s32 ChrTbl_WrapCostume(s32 chara, s32 *costume) {

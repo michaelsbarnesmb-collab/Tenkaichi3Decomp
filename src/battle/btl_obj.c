@@ -29,6 +29,9 @@
 #include "sys/dma.h"
 #include "sys/file.h"
 #include "sys/heap.h"
+#ifdef PORT
+#include "plat_chars.h" /* characters added past the original's 161 */
+#endif
 
 extern void *memset(void *dst, s32 c, u32 n);
 extern f32 sqrtf(f32 x);
@@ -453,7 +456,11 @@ void BtlObj_Setup(BtlObj *obj, s32 type, BtlResSlot *res, s32 id, s32 active) {
     BtlObjMdl_Create(type, obj, res);
     obj->active = active;
     obj->id = id;
+#ifdef PORT
+    obj->chara = Port_CharaOfFile(res->file[0].id) >= 0 ? Port_CharaOfFile(res->file[0].id) : (res->file[0].id - 0x590) / 10;
+#else
     obj->chara = (res->file[0].id - 0x590) / 10;
+#endif
     BtlObj_InitChains(obj);
 }
 
@@ -518,7 +525,12 @@ s32 BtlObj_RequestCharaModel(s32 side, s32 chara, s32 costume, s32 variant) {
     } else {
         model = chara * 10 + costume + 0x590;
     }
+#ifdef PORT
+    return BtlRes_Request(1, Port_CharaFile(model, chara, PORT_CHARA_MODEL + costume + (variant != 0 ? 4 : 0)),
+                          Port_CharaFile(chara * 10 + 0x598, chara, PORT_CHARA_ANIM), Port_CharaFile(chara * 10 + 0x599, chara, PORT_CHARA_EFFECTS));
+#else
     return BtlRes_Request(1, model, chara * 10 + 0x598, chara * 10 + 0x599);
+#endif
 }
 
 /* Returns the work block. */

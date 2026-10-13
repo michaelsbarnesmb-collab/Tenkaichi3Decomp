@@ -209,6 +209,11 @@ int __wrap_Progress_Main(int arg) {
             BattleSide_GetMember(0, 0)->chara = atoi(getenv("BT3_CHARA"));
             BattleSide_GetMember(0, 0)->costume = getenv("BT3_COSTUME") != NULL ? atoi(getenv("BT3_COSTUME")) : 0;
             BattleSide_GetMember(0, 0)->variant = getenv("BT3_VARIANT") != NULL;
+            {
+                /* the setup's end copies it (the battle runs from that copy): again, with the new fighter */
+                extern void BattleSetup_Finish(void);
+                BattleSetup_Finish();
+            }
             printf("bt3: side 0 is character %d, costume %d\n", BattleSide_GetMember(0, 0)->chara, BattleSide_GetMember(0, 0)->costume);
         }
     }

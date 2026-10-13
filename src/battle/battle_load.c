@@ -8,6 +8,9 @@
 #include "sys/job.h"
 #include "sys/loading.h"
 #include "sys/save.h"
+#ifdef PORT
+#include "plat_chars.h" /* characters added past the original's 161: their files' ids */
+#endif
 
 #ifdef PORT
 /* PC build: a stage added from outside the disc (id 0x24 on) has no files on the disc. Every file id the game
@@ -333,6 +336,9 @@ s32 BtlLoad_StepObject(BtlJob *job) {
             } else {
                 id = job->chara * 10 + job->animChara + BTL_FILE_CHARA;
             }
+#ifdef PORT
+            id = Port_CharaFile(id, job->chara, PORT_CHARA_MODEL + job->animChara + (job->unk1C != 0 ? 4 : 0));
+#endif
         }
         gBtlLoadHandle = BtlRes_Request(0, id, -1, -1);
         job->state++;
@@ -406,6 +412,12 @@ s32 BtlLoad_StepChara(BtlJob *job) {
             file8 = job->animChara * 10 + (BTL_FILE_CHARA + 8);
             file9 = job->unk1C * 10 + (BTL_FILE_CHARA + 9);
             voice = job->voiceChara + ((gSaveData->flags & SAVE_FLAG_VOICE) ? BTL_FILE_VOICE_ALT : BTL_FILE_VOICE);
+#ifdef PORT
+            model = Port_CharaFile(model, job->chara, PORT_CHARA_MODEL + job->costume + (job->variant != 0 ? 4 : 0));
+            file8 = Port_CharaFile(file8, job->animChara, PORT_CHARA_ANIM);
+            file9 = Port_CharaFile(file9, job->unk1C, PORT_CHARA_EFFECTS);
+            voice = Port_CharaFile(voice, job->voiceChara, (gSaveData->flags & SAVE_FLAG_VOICE) ? PORT_CHARA_BANK : PORT_CHARA_BANK_JP);
+#endif
             BtlRes_Reload(BattleSide_GetModelSlot(job->side), model, file8, file9);
             res->bank = File_Request3(voice, res->bank, res->bankSize);
             if (!BtlCtrl_IsSwitching(job->side)) {
@@ -416,9 +428,17 @@ s32 BtlLoad_StepChara(BtlJob *job) {
                     member = BtlSide_GetActiveMember(job->side);
                 }
                 next = BattleSide_GetMember(job->side, member);
+#ifdef PORT
+                next->buf[1] = File_Request3(Port_CharaFile(job->chara * 2 + job->side + BTL_FILE_CHARA_DATA, job->chara, PORT_CHARA_DATA + job->side),
+                                             next->buf[1], BTL_MEMBER_BUF_SIZE);
+#else
                 next->buf[1] = File_Request3(job->chara * 2 + job->side + BTL_FILE_CHARA_DATA, next->buf[1], BTL_MEMBER_BUF_SIZE);
+#endif
             }
         } else {
+#ifdef PORT
+            model = Port_CharaFile(model, job->chara, PORT_CHARA_MODEL + job->costume + (job->variant != 0 ? 4 : 0));
+#endif
             BtlRes_Reload(BattleSide_GetModelSlot(job->side), model, -1, -1);
         }
         Battle_GetWork()->flags |= BATTLE_FLAG_LOAD_CHARA;
@@ -500,8 +520,17 @@ s32 BtlLoad_StepInitial(BtlJob *job) {
     case 0:
         res->sndCommon = File_Request3(BTL_FILE_SND_COMMON, NULL, 0);
         res->sndStage = File_Request3(BTL_STAGE_BANK(Battle_GetStartStage()), NULL, 0);
+#ifdef PORT
+        for (side = 0; side < 2; side++) {
+            res->sndChara[side] = File_Request3(Port_CharaFile(BattleSide_GetStartChara(side) + ((gSaveData->flags & SAVE_FLAG_VOICE) ? BTL_FILE_VOICE_ALT : BTL_FILE_VOICE),
+                                                               BattleSide_GetStartChara(side),
+                                                               (gSaveData->flags & SAVE_FLAG_VOICE) ? PORT_CHARA_BANK : PORT_CHARA_BANK_JP),
+                                                NULL, 0);
+        }
+#else
         res->sndChara[0] = File_Request3(BattleSide_GetStartChara(0) + ((gSaveData->flags & SAVE_FLAG_VOICE) ? BTL_FILE_VOICE_ALT : BTL_FILE_VOICE), NULL, 0);
         res->sndChara[1] = File_Request3(BattleSide_GetStartChara(1) + ((gSaveData->flags & SAVE_FLAG_VOICE) ? BTL_FILE_VOICE_ALT : BTL_FILE_VOICE), NULL, 0);
+#endif
         job->state++;
         return 0;
     case 1:
@@ -590,7 +619,12 @@ s32 BtlLoad_StepInitial(BtlJob *job) {
         for (side = 0; side < 2; side++) {
             for (i = 0; (u32)i < (u32)BattleSide_GetMemberCount(side); i++) {
                 m = BattleSide_GetMember(side, i);
+#ifdef PORT
+                m->buf[0] = File_Request3(Port_CharaFile(m->chara * 2 + side + BTL_FILE_CHARA_DATA, m->chara, PORT_CHARA_DATA + side), m->buf[0],
+                                          BTL_MEMBER_BUF_SIZE);
+#else
                 m->buf[0] = File_Request3(m->chara * 2 + side + BTL_FILE_CHARA_DATA, m->buf[0], BTL_MEMBER_BUF_SIZE);
+#endif
             }
         }
         res->unk8 = File_Request3(gProgress->unk0[0] + 6, NULL, 0);
