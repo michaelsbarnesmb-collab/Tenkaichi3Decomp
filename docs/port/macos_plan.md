@@ -195,3 +195,8 @@ The program's path comes from `_NSGetExecutablePath` (there is no /proc).
 Still to do: an online match Mac against Linux (the attract demo with `BT3_NET_HOST` crashes on Linux too: not a
 test; needs a pad recording, `BT3_PAD_TABLE`, played with `BT3_NET_SCRIPT`); sound, input, netplay checks; `.app` package. Calls from hard-float port code (Apple clang) to game
 functions are not covered by the signature list.
+- A port file that declares game structures with `GAME_PTR` takes `__aarch64__` in its 64-bit test (as headless.c),
+  and its `_Static_assert`s on their layouts are off under `__APPLE__`: ptr32.py reads every soft-float port file with
+  pip's libclang 18, which for an arm64 target leaves `__ptr32` pointers 8 bytes wide, so a layout check fails there
+  and the file is left out of the program (the screen reader's a11y_game.c: the game stopped at start with "not
+  implemented yet: PortA11y_GameTick", 2026-10-13). The Linux and Windows builds check the same layouts.
