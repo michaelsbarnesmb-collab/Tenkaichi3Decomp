@@ -114,6 +114,10 @@ extern void Port_NetRules(int *type, int *dp, int *time); /* gs/net.c */
 int __wrap_Progress_Main(int arg) {
     const char *path;
     PortStages_Init();
+    {
+        extern void PortCharas_Init(void); /* plat_charas.c: the characters folder */
+        PortCharas_Init();
+    }
     PortSongs_Init();
     {
         extern void Port_VerifyStart(void); /* plat_verify.c: is the data the original disc's (in the background) */

@@ -29,9 +29,6 @@
 #include "sys/dma.h"
 #include "sys/file.h"
 #include "sys/heap.h"
-#ifdef PORT
-#include "plat_chars.h" /* characters added past the original's 161 */
-#endif
 
 extern void *memset(void *dst, s32 c, u32 n);
 extern f32 sqrtf(f32 x);
@@ -456,11 +453,7 @@ void BtlObj_Setup(BtlObj *obj, s32 type, BtlResSlot *res, s32 id, s32 active) {
     BtlObjMdl_Create(type, obj, res);
     obj->active = active;
     obj->id = id;
-#ifdef PORT
-    obj->chara = Port_CharaOfFile(res->file[0].id) >= 0 ? Port_CharaOfFile(res->file[0].id) : (res->file[0].id - 0x590) / 10;
-#else
-    obj->chara = (res->file[0].id - 0x590) / 10;
-#endif
+    obj->chara = CHARA_FROM_FILE(res->file[0].id);
     BtlObj_InitChains(obj);
 }
 
@@ -521,16 +514,11 @@ s32 BtlObj_RequestCharaModel(s32 side, s32 chara, s32 costume, s32 variant) {
     s32 model;
 
     if (variant != 0) {
-        model = chara * 10 + costume + 0x594;
+        model = CHARA_FILE10(chara) + costume + 0x594;
     } else {
-        model = chara * 10 + costume + 0x590;
+        model = CHARA_FILE10(chara) + costume + 0x590;
     }
-#ifdef PORT
-    return BtlRes_Request(1, Port_CharaFile(model, chara, PORT_CHARA_MODEL + costume + (variant != 0 ? 4 : 0)),
-                          Port_CharaFile(chara * 10 + 0x598, chara, PORT_CHARA_ANIM), Port_CharaFile(chara * 10 + 0x599, chara, PORT_CHARA_EFFECTS));
-#else
-    return BtlRes_Request(1, model, chara * 10 + 0x598, chara * 10 + 0x599);
-#endif
+    return BtlRes_Request(1, model, CHARA_FILE10(chara) + 0x598, CHARA_FILE10(chara) + 0x599);
 }
 
 /* Returns the work block. */
@@ -1184,6 +1172,22 @@ void BtlRes_CommitReload(void) {
 }
 
 /* Clears the slots; with prealloc, allocates the buffers of the two fixed slots and the spare model buffer. */
+#ifdef PORT
+/* PC build: the buffer of a fighter's model file. The disc's largest model is 841,984 bytes and the original
+   reserves 0xCE000; a character from outside the disc can be larger (seen: 964 KB), and a file larger than the
+   buffer is read past its end. The three buffers are as large as the largest model there is to load, among the
+   added characters and in the data folder itself (a disc whose characters were replaced: seen, 1.15 MB), up to
+   1.5 MB (Port_ModelSize, port/src/plat_charas.c). With nothing larger than the disc's, and in an online session
+   (where both games must be the same in every byte), they are the original's. */
+extern int Port_ModelSize(void);
+extern int Port_NetSession(void);
+static s32 BtlRes_ModelSize(void) {
+    return Port_NetSession() ? BTL_RES_MODEL_SIZE : Port_ModelSize();
+}
+#else
+#define BtlRes_ModelSize() BTL_RES_MODEL_SIZE
+#endif
+
 void BtlRes_Init(s32 prealloc) {
     BtlResWork *res = BtlRes_GetWork();
     s32 number = 0;
@@ -1195,11 +1199,11 @@ void BtlRes_Init(s32 prealloc) {
     res->prealloc = prealloc;
     if (prealloc != 0) {
         for (i = 0; i < 3; i++) {
-            res->spare[i].buf = Heap_Alloc(BTL_RES_MODEL_SIZE, 0x40, 0, HEAP_ANY);
+            res->spare[i].buf = Heap_Alloc(BtlRes_ModelSize(), 0x40, 0, HEAP_ANY);
             res->spare[i].size = 0;
             res->spare[i].id = -1;
             res->spare[i].orig = res->spare[i].buf;
-            memset(res->spare[i].buf, 0, BTL_RES_MODEL_SIZE);
+            memset(res->spare[i].buf, 0, BtlRes_ModelSize());
         }
         for (i = 0; i < BTL_RES_FIXED_MAX; i++) {
             slot = &res->fixed[i];

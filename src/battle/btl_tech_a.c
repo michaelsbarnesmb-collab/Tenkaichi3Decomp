@@ -1350,9 +1350,29 @@ s32 BtlParam_GetUnkAC(BtlTechChr *chr) {
     return BtlChar_GetObj(chr)->param->transDefault;
 }
 
+#ifdef PORT
+/* PC build: the forms of a character of a package (an added character, or a disc character a folder replaces).
+   Its parameter table names them by the numbers of whoever made the pack; the links of its manifest say which
+   installed folder each is (port/src/plat_charas.c; -1 where the manifest says nothing, and for every other
+   character). The fighter's character is the object's (+0xC), taken from its model file. `slot`: 0..3 the
+   transformations, 4..6 the fusion results. */
+extern int Port_CharaFormTarget(int chara, int slot);
+static s32 BtlParam_PortTarget(BtlTechChr *chr, s32 slot, s32 own) {
+    s32 chara = *(s32 *)((u8 *)BtlChar_GetObj(chr) + 0xC);
+    s32 t;
+
+    if ((t = Port_CharaFormTarget(chara, slot)) >= 0) {
+        return t;
+    }
+    return own;
+}
+#else
+#define BtlParam_PortTarget(chr, slot, own) (own)
+#endif
+
 /* Parameter +0x98 + slot: transformation target, 0xFF = none. */
 s32 BtlParam_GetSlotId(BtlTechChr *chr, s32 slot) {
-    return BtlChar_GetObj(chr)->param->transTarget[slot];
+    return BtlParam_PortTarget(chr, slot, BtlChar_GetObj(chr)->param->transTarget[slot]);
 }
 
 /* Parameter +0x9C + slot, times 100000: blast gauge a transformation costs. */
@@ -1387,7 +1407,7 @@ s32 BtlParam_CountSlots(BtlTechChr *chr) {
     s32 i;
 
     for (i = 0; i < 4; i++) {
-        if (param->transTarget[i] != 0xFF) {
+        if (BtlParam_PortTarget(chr, i, param->transTarget[i]) != 0xFF) {
             n++;
         }
     }
@@ -1401,7 +1421,7 @@ s32 BtlParam_TestUnkADBit(BtlTechChr *chr, s32 n) {
 
 /* Parameter +0xB4 + n: fusion n. */
 s32 BtlParam_GetUnkB4(BtlTechChr *chr, s32 n) {
-    return BtlChar_GetObj(chr)->param->fusionResult[n];
+    return BtlParam_PortTarget(chr, 4 + n, BtlChar_GetObj(chr)->param->fusionResult[n]);
 }
 
 /* Parameter +0xB7 + n: fusion n. */
@@ -1411,7 +1431,7 @@ s32 BtlParam_GetUnkB7(BtlTechChr *chr, s32 n) {
 
 /* Parameter +0xBA + n * 4 + m: partner m of fusion n. */
 s32 BtlParam_GetUnkBA(BtlTechChr *chr, s32 n, s32 m) {
-    return BtlChar_GetObj(chr)->param->fusionPartner[n][m];
+    return BtlParam_PortTarget(chr, 7 + n * 4 + m, BtlChar_GetObj(chr)->param->fusionPartner[n][m]);
 }
 
 /* Parameter +0xAE + n, times 100000: blast gauge fusion n costs. */

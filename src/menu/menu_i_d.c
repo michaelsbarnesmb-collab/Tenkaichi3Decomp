@@ -28,7 +28,7 @@ void EntrySel_SwapRowTex(void) {
 
         gEntrySel->sel->prevRowChara[i] = gEntrySel->sel->rowChara[i];
         gEntrySel->sel->rowChara[i] = chara;
-        res = (MTexRes *)MPACK_AT(gEntrySel->chips, chara + 1);
+        res = (MTexRes *)PORT_CHIP(gEntrySel->chips, chara);
         gEntrySel->texB[18 + i] = gEntrySel->texB[tbl[i]];
         gEntrySel->texB[tbl[i]] = MTEX(res, 0);
     }
@@ -50,7 +50,7 @@ void EntrySel_SetRowTex(void) {
         }
         gEntrySel->sel->prevRowChara[i] = gEntrySel->sel->rowChara[i];
         gEntrySel->sel->rowChara[i] = chara;
-        res = (MTexRes *)MPACK_AT(gEntrySel->chips, chara + 1);
+        res = (MTexRes *)PORT_CHIP(gEntrySel->chips, chara);
         gEntrySel->texB[18 + i] = gEntrySel->texB[tbl[i]];
         gEntrySel->texB[tbl[i]] = MTEX(res, 0);
     }
@@ -65,7 +65,7 @@ void EntrySel_SetMemberTex(void) {
         gEntrySel->texA[10 + i] = NULL;
     }
     for (i = 0; i < gEntrySel->sel->cur; i++) {
-        res = (MTexRes *)MPACK_AT(gEntrySel->chips, gEntrySel->sel->entry[i].chara + 1);
+        res = (MTexRes *)PORT_CHIP(gEntrySel->chips, gEntrySel->sel->entry[i].chara);
         gEntrySel->texA[10 + i] = MTEX(res, 0);
     }
 }
@@ -86,7 +86,7 @@ void EntrySel_UpdateImage(void) {
         break;
     case ESEL_LOAD_REQUEST:
         File_CancelRequests();
-        File_Request(gEntrySel->sel->image + 0x2F9, gEntrySel->imageFile, 0x16800);
+        File_Request(CHARA_FACE_FILE(gEntrySel->sel->image), gEntrySel->imageFile, 0x16800);
         gEntrySel->loadState = ESEL_LOAD_READ;
         break;
     case ESEL_LOAD_READ:
@@ -266,12 +266,21 @@ void EntrySel_Init(s32 section) {
     MsgWin_Open();
     gEntrySel->items = MPACK_AT(gCommonRes->data[2], 2);
     gEntrySel->nameText = MPACK_AT(gEntrySel->res, 30);
+#ifdef PORT /* (the names of the characters added from outside the disc after the disc's) */
+    gEntrySel->nameText = Port_CharaNamePack(gEntrySel->nameText);
+#endif
     gEntrySel->formText = MPACK_AT(gEntrySel->res, 31);
+#ifdef PORT /* (a line more for every added character: its own label) */
+    gEntrySel->formText = Port_CharaFormPack(gEntrySel->formText);
+#endif
     gEntrySel->chips = (u32 *)MPACK_AT(gEntrySel->res, 32);
     for (i = 0; i < ESEL_CELL_MAX; i++) {
         res = (MTexRes *)MPACK_AT(gEntrySel->chips, i + 1);
         Res_RelocateOffsets(&res, res, res);
     }
+#ifdef PORT /* (the folders' chips, made ready like the disc's) */
+    PortChips_Load(gEntrySel->chips);
+#endif
     gEntrySel->grid = ((ESelGridList *)MPACK_AT(gEntrySel->res, 29))->cell;
     gEntrySel->gridCount = gEntrySel->res[gEntrySel->res[29] >> 2];
     ChrGrid_Build(&gEntrySel->gridOutCount, gEntrySel->gridBuf, &gEntrySel->gridCount, gEntrySel->grid, NULL, NULL);
@@ -291,7 +300,8 @@ void EntrySel_Init(s32 section) {
     gEntrySel->sel = &gEntrySel->state;
     gEntrySel->sel->entry[0] = TOUR_PROG->lastEntry;
     gEntrySel->loadState = ESEL_LOAD_SHOWN;
-    if (!ChrGrid_IsSelectable(gEntrySel->grid, ES_CUR.col + ES_CUR.row * ESEL_COLS)) {
+    if (!PORT_CELL_IN(ES_CUR.col + ES_CUR.row * ESEL_COLS, gEntrySel->gridCount) ||
+        !ChrGrid_IsSelectable(gEntrySel->grid, ES_CUR.col + ES_CUR.row * ESEL_COLS)) {
         memset(gEntrySel->sel, 0, sizeof(ESelEntry));
         gEntrySel->sel->entry[0].col = 0;
         TOUR_PROG->lastEntry = gEntrySel->sel->entry[0];
@@ -310,10 +320,10 @@ void EntrySel_Init(s32 section) {
 
             while (1) {
                 n = Rand_Range(gEntrySel->gridCount);
-                if (gEntrySel->grid[n].id <= 0xA0) {
+                if (PORT_IN_POOL(gEntrySel->grid[n].id)) {
                     gEntrySel->sel->entry[i].col = n % cols;
                     gEntrySel->sel->entry[i].row = n / cols;
-                    gEntrySel->sel->entry[i].custom = Rand_Range(4);
+                    gEntrySel->sel->entry[i].custom = PORT_SAVE_CELL(n) ? Rand_Range(4) : 0; /* (an added cell has no sets) */
                     if (gEntrySel->grid[n].formCount != 0) {
                         gEntrySel->sel->entry[i].form = Rand_Range(gEntrySel->grid[n].formCount);
                     }
@@ -330,7 +340,7 @@ void EntrySel_Init(s32 section) {
     for (i = 0; i < 2; i++) {
         gEntrySel->blink[i] = Rand_Range(0x20);
     }
-    File_LoadSync(gEntrySel->sel->image + 0x2F9, gEntrySel->imageFile, 0x16800);
+    File_LoadSync(CHARA_FACE_FILE(gEntrySel->sel->image), gEntrySel->imageFile, 0x16800);
     Sprite_Unpack(gEntrySel->imageFile, gEntrySel->imageRes, NULL);
     res = gEntrySel->imageRes;
     Res_RelocateOffsets(&res, res, res);
@@ -352,6 +362,9 @@ void EntrySel_Init(s32 section) {
 void EntrySel_Term(void) {
     s32 i;
 
+#ifdef PORT /* (the folders' chips) */
+    PortChips_Free();
+#endif
     ItemHelp_Term();
     MsgWin_Term();
     ItemPanel_Term(0);
@@ -402,9 +415,9 @@ void EntrySel_Draw(void) {
     Flash_FindLabel(flash, NULL, "mc_single_chara_l", &ref);
     Flash_ClipSetAlpha(flash, &ref, gEntrySel->imageAlpha);
     Flash_FindLabel(flash, NULL, "mc_name_text_l", &ref);
-    TextBox_AttachLine(flash, &ref, 0, 0, gEntrySel->sel->image, &gEntrySel->box[0]);
+    TextBox_AttachLine(flash, &ref, 0, 0, PORT_NAME_LINE(gEntrySel->sel->image), &gEntrySel->box[0]);
     Flash_FindLabel(flash, NULL, "mc_form_text_l", &ref);
-    TextBox_AttachLine(flash, &ref, 0, 0, gEntrySel->sel->image, &gEntrySel->box[1]);
+    TextBox_AttachLine(flash, &ref, 0, 0, PORT_FORM_LINE(gEntrySel->sel->image), &gEntrySel->box[1]);
     for (i = 0; i < ESEL_ENTRY_MAX; i++) {
         /* the entry list: "entry n" for those still to choose, the "decided" text for the chosen ones */
         sprintf(name, "mc_entry_text_%d", i);
@@ -651,7 +664,7 @@ void EntrySel_Input(s32 *result) {
                 Flash_GotoLabel(&gEntrySel->flash[2], "fl_custom_in", 1);
                 EntrySel_ClipGoto(1, 0, "fl_ok");
                 EntrySel_ClipGoto(2, 2, "fl_on_start");
-                gEntrySel->customCount = (gEntrySel->flags & ESEL_NO_CUSTOM) ? 1 : 4;
+                gEntrySel->customCount = ((gEntrySel->flags & ESEL_NO_CUSTOM) || PORT_CHARA_ADDED(gEntrySel->sel->image)) ? 1 : 4;
                 if (ES_CUR.custom >= gEntrySel->customCount) {
                     ES_CUR.custom = 0;
                 }
@@ -679,7 +692,7 @@ void EntrySel_Input(s32 *result) {
                 Flash_GotoLabel(&gEntrySel->flash[2], "fl_custom_in", 1);
                 EntrySel_ClipGoto(1, 0, "fl_ok");
                 EntrySel_ClipGoto(2, 2, "fl_on_start");
-                gEntrySel->customCount = (gEntrySel->flags & ESEL_NO_CUSTOM) ? 1 : 4;
+                gEntrySel->customCount = ((gEntrySel->flags & ESEL_NO_CUSTOM) || PORT_CHARA_ADDED(gEntrySel->sel->image)) ? 1 : 4;
                 if (ES_CUR.custom >= gEntrySel->customCount) {
                     ES_CUR.custom = 0;
                 }
@@ -725,7 +738,7 @@ void EntrySel_Input(s32 *result) {
             Flash_GotoLabel(&gEntrySel->flash[2], "fl_custom_in", 1);
             EntrySel_ClipGoto(1, 1, "fl_ok");
             EntrySel_ClipGoto(2, 2, "fl_on_start");
-            gEntrySel->customCount = (gEntrySel->flags & ESEL_NO_CUSTOM) ? 1 : 4;
+            gEntrySel->customCount = ((gEntrySel->flags & ESEL_NO_CUSTOM) || PORT_CHARA_ADDED(gEntrySel->sel->image)) ? 1 : 4;
             if (ES_CUR.custom >= gEntrySel->customCount) {
                 ES_CUR.custom = 0;
             }
@@ -871,7 +884,7 @@ void EntrySel_Input(s32 *result) {
                     do {
                         slot = Rand_Range(gEntrySel->gridCount);
                         id = gEntrySel->grid[slot].id;
-                    } while (id >= ESEL_ID_RANDOM);
+                    } while (!PORT_IN_POOL(id));
                     chara = id;
                     if (gEntrySel->grid[slot].formCount != 0) {
                         cell = &gEntrySel->grid[slot];
@@ -882,7 +895,7 @@ void EntrySel_Input(s32 *result) {
                     ES_CUR.chara = gEntrySel->sel->rowChara[ES_CUR.col];
                     slot = ES_CUR.col + ES_CUR.row * ESEL_COLS;
                 }
-                if (ES_CUR.custom != 0) {
+                if (ES_CUR.custom != 0 && PORT_SAVE_CELL(slot)) {
                     ES_CUR.items = *(TourItemSet *)gSaveData->custom[slot].item[ES_CUR.custom - 1];
                 } else {
                     memset(&ES_CUR.items, 0, 16);

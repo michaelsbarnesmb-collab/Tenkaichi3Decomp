@@ -18,9 +18,11 @@ static s32 sPortStageNameHidden;
 static s32 sPortStagesAdded; /* this stage select shows stages from outside the disc */
 static s32 sPortSongsAdded;  /* ... and its music list songs from outside the disc */
 static s32 sPortStageRows = TS_STAGE_COLS; /* rows of the stage reel: the game's 6, more with stages added */
-/* The picture behind the reel: a disc stage's own (0x39D + id); an added stage borrows one (its id past 0x23
-   would fall on the loading screens' files), as in the duel's select. */
-#define TS_STAGE_PICTURE(id) (TS_STAGE_FILE + ((id) < 0x24 ? (id) : (id) - 0x24))
+/* The picture behind the reel: a disc stage's own (0x39D + id); an added stage's has a file id of its own, which
+   the file layer answers with the stage's `.thumb` or a disc picture (as in the duel's select, menu_d.h). */
+#define TS_STAGE_PICTURE(id) ((id) < 0x24 ? TS_STAGE_FILE + (id) : 0xD48 + 70100 + ((id) - 0x24))
+extern void PortStageIcons_Load(void), PortStageIcons_Free(void); /* port/src/plat_stages.c */
+extern void *PortStageIcons_Get(int id);
 /* include/battle/view_a.h holds these; repeated here (pulling it in clashes with the menu headers). The PC build
    moves the locked / empty markers up so added stages keep their own ids. */
 #define STGGRID_ID_LOCKED 0x3E
@@ -146,6 +148,9 @@ void TeamSel_SetStageChips(void) {
             /* (a stage added from outside the disc, id 0x24 on, borrows an icon as in the duel's select) */
             s32 icon = id == STGGRID_ID_LOCKED ? 37 : (id == STGGRID_ID_EMPTY ? 38 : (id >= 0x24 ? 1 + (id - 0x24) % 36 : id + 1));
             res = (MTexRes *)MPACK_AT(gTeamSel->stagePack, icon);
+            if (id >= 0x24 && id < STGGRID_ID_LOCKED && PortStageIcons_Get(id) != NULL) {
+                res = (MTexRes *)PortStageIcons_Get(id); /* (its own icon, where its file brought one) */
+            }
         }
 #else
         res = (MTexRes *)MPACK_AT(gTeamSel->stagePack, id + 1);
@@ -166,7 +171,7 @@ void TeamSel_SetChips(s32 side) {
 
         gTeamSel->side[side]->chip[1][i] = gTeamSel->side[side]->chip[0][i];
         gTeamSel->side[side]->chip[0][i] = id;
-        res = (MTexRes *)MPACK_AT(gTeamSel->chipPack, id + 1);
+        res = (MTexRes *)PORT_CHIP(gTeamSel->chipPack, id);
         gTeamSel->sideTex[side][18 + i] = gTeamSel->sideTex[side][slot[i]];
         gTeamSel->sideTex[side][slot[i]] = res->tex;
     }
@@ -190,7 +195,7 @@ void TeamSel_SetGridFormChips(s32 side) {
         }
         gTeamSel->side[side]->chip[1][i] = gTeamSel->side[side]->chip[0][i];
         gTeamSel->side[side]->chip[0][i] = id;
-        res = (MTexRes *)MPACK_AT(gTeamSel->chipPack, id + 1);
+        res = (MTexRes *)PORT_CHIP(gTeamSel->chipPack, id);
         gTeamSel->sideTex[side][18 + i] = gTeamSel->sideTex[side][slot[i]];
         gTeamSel->sideTex[side][slot[i]] = res->tex;
     }
@@ -207,7 +212,7 @@ void TeamSel_SetCustomChips(s32 side) {
 
         gTeamSel->side[side]->chip[1][i] = gTeamSel->side[side]->chip[0][i];
         gTeamSel->side[side]->chip[0][i] = id;
-        res = (MTexRes *)MPACK_AT(gTeamSel->chipPack, id + 1);
+        res = (MTexRes *)PORT_CHIP(gTeamSel->chipPack, id);
         gTeamSel->sideTex[side][18 + i] = gTeamSel->sideTex[side][slot[i]];
         gTeamSel->sideTex[side][slot[i]] = res->tex;
     }
@@ -231,7 +236,7 @@ void TeamSel_SetFormChips(s32 side) {
         }
         gTeamSel->side[side]->chip[1][i] = gTeamSel->side[side]->chip[0][i];
         gTeamSel->side[side]->chip[0][i] = id;
-        res = (MTexRes *)MPACK_AT(gTeamSel->chipPack, id + 1);
+        res = (MTexRes *)PORT_CHIP(gTeamSel->chipPack, id);
         gTeamSel->sideTex[side][18 + i] = gTeamSel->sideTex[side][slot[i]];
         gTeamSel->sideTex[side][slot[i]] = res->tex;
     }
@@ -249,7 +254,7 @@ void TeamSel_SetTeamTex(s32 side) {
         gTeamSel->teamTex[side][slot[i]] = NULL;
         if (i < gTeamSel->side[side]->memberCount) {
             s32 id = gTeamSel->side[side]->member[i].chara;
-            MTexRes *res = (MTexRes *)MPACK_AT(gTeamSel->chipPack, id + 1);
+            MTexRes *res = (MTexRes *)PORT_CHIP(gTeamSel->chipPack, id);
 
             gTeamSel->teamTex[side][slot[i]] = res->tex;
             if (gTeamSel->battleType == 2) {
@@ -288,7 +293,7 @@ void TeamSel_UpdateFaceLoad(void) {
                 gTeamSel->faceState = TEAMSEL_LOAD_IDLE;
             }
         } else {
-            File_Request(gTeamSel->side[gTeamSel->faceSide]->chara + TS_FACE_FILE,
+            File_Request(CHARA_FACE_FILE(gTeamSel->side[gTeamSel->faceSide]->chara),
                          gTeamSel->faceFile[gTeamSel->faceSide], 0x16800);
             gTeamSel->faceState = TEAMSEL_LOAD_READ;
         }
@@ -626,17 +631,29 @@ void TeamSel_Init(s32 section) {
     IconWin_Init(MPACK_AT(gTeamSel->res, 54), res);
     gTeamSel->unk3EA0 = MPACK_AT(gCommonRes->data[2], 2);
     gTeamSel->nameText = MPACK_AT(gTeamSel->res, 43);
+#ifdef PORT /* (the names of the characters added from outside the disc after the disc's) */
+    gTeamSel->nameText = Port_CharaNamePack(gTeamSel->nameText);
+#endif
     gTeamSel->formText = MPACK_AT(gTeamSel->res, 44);
+#ifdef PORT /* (a line more for every added character: its own label) */
+    gTeamSel->formText = Port_CharaFormPack(gTeamSel->formText);
+#endif
     gTeamSel->chipPack = (u32 *)MPACK_AT(gTeamSel->res, 45);
     for (i = 0; i < TS_CELL_MAX; i++) {
         res = (MTexRes *)MPACK_AT(gTeamSel->chipPack, i + 1);
         Res_RelocateOffsets(&res, res, res);
     }
+#ifdef PORT /* (the folders' chips, made ready like the disc's) */
+    PortChips_Load(gTeamSel->chipPack);
+#endif
     gTeamSel->stagePack = (u32 *)MPACK_AT(gTeamSel->res, 46);
     for (i = 0; i < 38; i++) {
         res = (MTexRes *)MPACK_AT(gTeamSel->stagePack, i + 1);
         Res_RelocateOffsets(&res, res, res);
     }
+#ifdef PORT /* (the added stages' own icons) */
+    PortStageIcons_Load();
+#endif
     gTeamSel->stageIds = (s32 *)(MPACK_AT(gTeamSel->res, 39) + 0x10);
     gTeamSel->stageCount = TS_PACK_WORD(gTeamSel->res, 39);
     StgGrid_ApplyUnlocks(&gTeamSel->stageCount, gTeamSel->stageIds);
@@ -784,7 +801,9 @@ void TeamSel_Init(s32 section) {
     /* a remembered cursor on a cell that cannot be chosen any more goes back to column `side`, row 0 */
     for (i = 0; i < TEAMSEL_SIDES; i++) {
         for (j = 0; j < TS_MEMBER_MAX; j++) {
-            if (!ChrGrid_IsSelectable(gTeamSel->cells[i], gTeamSel->side[i]->member[j].col +
+            if (!PORT_CELL_IN(gTeamSel->side[i]->member[j].col + gTeamSel->side[i]->member[j].row * TS_COLS,
+                              gTeamSel->cellCount[i]) ||
+                !ChrGrid_IsSelectable(gTeamSel->cells[i], gTeamSel->side[i]->member[j].col +
                                                            gTeamSel->side[i]->member[j].row * TS_COLS)) {
                 memset(&gTeamSel->side[i]->member[j], 0, sizeof(TsMember));
                 gTeamSel->side[i]->member[j].col = i;
@@ -810,7 +829,7 @@ void TeamSel_Init(s32 section) {
         }
     }
     for (i = 0; i < TEAMSEL_SIDES; i++) {
-        File_LoadSync(gTeamSel->side[i]->chara + TS_FACE_FILE, gTeamSel->faceFile[i], 0x16800);
+        File_LoadSync(CHARA_FACE_FILE(gTeamSel->side[i]->chara), gTeamSel->faceFile[i], 0x16800);
         Sprite_Unpack(gTeamSel->faceFile[i], gTeamSel->faceRes[i], NULL);
         res = gTeamSel->faceRes[i];
         Res_RelocateOffsets(&res, res, res);
@@ -856,6 +875,7 @@ void TeamSel_Term(void) {
 #ifdef PORT
     gUiSongIdx = -1; /* drop the port's song-name and stage-name overlays */
     gUiNameIdx = -1;
+    PortStageIcons_Free();
 #endif
     IconWin_Term();
     ItemHelp_Term();
@@ -864,6 +884,9 @@ void TeamSel_Term(void) {
     for (i = 0; i < TEAMSEL_FLASH_NUM; i++) {
         Flash_Destroy(&gTeamSel->flash[i]);
     }
+#ifdef PORT /* (the folders' chips) */
+    PortChips_Free();
+#endif
     if (gTeamSel->stageRes[1] != NULL) {
         Heap_Free(gTeamSel->stageRes[1]);
         gTeamSel->stageRes[1] = NULL;
@@ -961,9 +984,9 @@ void TeamSel_Draw(void) {
         Flash_ClipSetAlpha(flash, &ref, gTeamSel->faceAlpha[i]);
         Flash_ClipSetFlags(flash, &ref, 0x80, (u8)gTeamSel->faceMask);
         Flash_FindLabel(flash, NULL, i ? "mc_name_text_r" : "mc_name_text_l", &ref);
-        TextBox_AttachLine(flash, &ref, 0, 0, gTeamSel->side[i]->chara, &gTeamSel->nameBox[i]);
+        TextBox_AttachLine(flash, &ref, 0, 0, PORT_NAME_LINE(gTeamSel->side[i]->chara), &gTeamSel->nameBox[i]);
         Flash_FindLabel(flash, NULL, i ? "mc_form_text_r" : "mc_form_text_l", &ref);
-        TextBox_AttachLine(flash, &ref, 0, 0, gTeamSel->side[i]->chara, &gTeamSel->formBox[i]);
+        TextBox_AttachLine(flash, &ref, 0, 0, PORT_FORM_LINE(gTeamSel->side[i]->chara), &gTeamSel->formBox[i]);
     }
     uv.x0 = 0;
     uv.x1 = 0x200;
@@ -1256,7 +1279,7 @@ void TeamSel_Draw(void) {
             Flash_ClipSetFlags(flash, &ref, 0x80, (u8)gTeamSel->side[i]->mask);
             chara = gTeamSel->side[i]->chip[j / cols][j % cols];
             if (gTeamSel->battleType == 2) {
-                if (chara < TS_RANDOM) {
+                if (PORT_IS_CHARA(chara)) {
                     cost = ChrTbl_GetCost(chara);
                 } else {
                     cost = 0;
@@ -1265,14 +1288,14 @@ void TeamSel_Draw(void) {
                 Flash_FindLabel(flash, name, name2, &ref);
                 if (gTeamSel->side[i]->cost + cost > gTeamSel->dpMax) {
                     Flash_ClipSetColor(flash, &ref, 0.4f);
-                } else if (chara < TS_RANDOM) {
+                } else if (PORT_IS_CHARA(chara)) {
                     Flash_ClipSetColor(flash, &ref, TeamSel_IsCharaFree(i, chara) ? 1.0f : 0.4f);
                 } else {
                     Flash_ClipSetColor(flash, &ref, 1.0f);
                 }
                 sprintf(name2, "mc_dp_num_%03d", j);
                 Flash_FindLabel(flash, name, name2, &ref);
-                if (chara < TS_RANDOM) {
+                if (PORT_IS_CHARA(chara)) {
                     uv.x0 = (cost % 4) * 0x20;
                     uv.x1 = uv.x0 + 0x20;
                     uv.y0 = (cost / 4) * 0x20;
@@ -1285,7 +1308,7 @@ void TeamSel_Draw(void) {
             } else {
                 sprintf(name2, "mc_chara_%03d", j);
                 Flash_FindLabel(flash, name, name2, &ref);
-                if (chara < TS_RANDOM) {
+                if (PORT_IS_CHARA(chara)) {
                     Flash_ClipSetColor(flash, &ref, TeamSel_IsCharaFree(i, chara) ? 1.0f : 0.4f);
                 } else {
                     Flash_ClipSetColor(flash, &ref, 1.0f);
@@ -1688,7 +1711,7 @@ f32 TeamSel_Input(s32 *result) {
                         } else if (TeamSel_IsCharaFree(CUR_N, CUR_SIDE->chara)) {
                             Flash_GotoLabel(&gTeamSel->flash[CUR_N + 5], "fl_custom_in", 1);
                             TeamSel_ClipGoto(CUR_N + 3, CUR_N, TEAMSEL_CLIP_CHIP, "fl_ok");
-                            gTeamSel->plateCount[CUR_N] = (gTeamSel->battleType == 2) ? 1 : 4;
+                            gTeamSel->plateCount[CUR_N] = (gTeamSel->battleType == 2 || PORT_CHARA_ADDED(CUR_SIDE->chara)) ? 1 : 4;
                             if (!(CUR_MEMBER.plate < gTeamSel->plateCount[CUR_N])) {
                                 CUR_MEMBER.plate = 0;
                             }
@@ -1768,7 +1791,7 @@ f32 TeamSel_Input(s32 *result) {
                                 CUR_MEMBER.plate = 0;
                             }
                         } else {
-                            gTeamSel->plateCount[CUR_N] = (gTeamSel->battleType == 2) ? 1 : 4;
+                            gTeamSel->plateCount[CUR_N] = (gTeamSel->battleType == 2 || PORT_CHARA_ADDED(CUR_SIDE->chara)) ? 1 : 4;
                             if (!(CUR_MEMBER.plate < gTeamSel->plateCount[CUR_N])) {
                                 CUR_MEMBER.plate = 0;
                             }
@@ -1937,7 +1960,7 @@ f32 TeamSel_Input(s32 *result) {
                             do {
                                 for (;;) {
                                     idx = Rand_Range(gTeamSel->masterCount[CUR_N]);
-                                    if (gTeamSel->cells[CUR_N][idx].id < TS_RANDOM) {
+                                    if (PORT_IN_POOL(gTeamSel->cells[CUR_N][idx].id)) {
                                         chara = gTeamSel->cells[CUR_N][idx].id;
                                         break;
                                     }
@@ -1952,7 +1975,7 @@ f32 TeamSel_Input(s32 *result) {
                             CUR_MEMBER.chara = CUR_SIDE->chip[0][CUR_MEMBER.col];
                             idx = CUR_MEMBER.col + CUR_MEMBER.row * TS_COLS;
                         }
-                        if (CUR_MEMBER.plate != 0) {
+                        if (CUR_MEMBER.plate != 0 && PORT_SAVE_CELL(idx)) {
                             CUR_ITEMS = TS_SAVE->custom[idx].set[CUR_MEMBER.plate - 1];
                         } else {
                             memset(&CUR_ITEMS, 0, sizeof(TsItemSet));

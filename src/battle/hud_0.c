@@ -316,9 +316,9 @@ static void PauseMenu_PortRemove(BtlMenu *menu, s32 id) {
 }
 
 #include "battle/battle_setup.h"
-#include "plat_chars.h"
+#include "port_chara.h"
 
-/* A battle with a character added past the original's (port/src/plat_chars.c) does not offer to save its replay
+/* A battle with a character added past the original's (port/src/plat_charas.c) does not offer to save its replay
    ("Save Replay Data", id 0x17): a copy of the game without that character could not play it. The menus are the
    game's own data, changed in place: they are put back as they were for every other battle. */
 static void PauseMenu_PortReplaySave(void) {
@@ -331,7 +331,7 @@ static void PauseMenu_PortReplaySave(void) {
 
     for (side = 0; side < 2; side++) {
         for (i = 0; i < BattleSide_GetMemberCount(side); i++) {
-            added |= Port_CharaAdded(BattleSide_GetMember(side, i)->chara);
+            added |= PORT_CHARA_ADDED(BattleSide_GetMember(side, i)->chara);
         }
     }
     for (i = 0; i < 4; i++) {

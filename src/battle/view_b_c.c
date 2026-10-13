@@ -88,15 +88,16 @@ s32 ChrTbl_IsRelated(s32 a, s32 b) {
     }
     file = (ChrTblFile *)gCommonRes->data[2];
     table = (ChrTblEntry *)((u8 *)file + ((file->charaOffset >> 2) << 2));
-#ifdef PORT
-    {
-        extern void *Port_ChrTblSection(void *file, void *section); /* plat_chars.c: room for added characters */
-        table = (ChrTblEntry *)Port_ChrTblSection(file, table);
-    }
-#endif
     if (a == b) {
         return 1;
     }
+#ifdef PORT /* (PC build: an added character is related to whom its base character is) */
+    a = CHARA_T(a);
+    b = CHARA_T(b);
+    if (a == b) {
+        return 1;
+    }
+#endif
     for (i = 0; i < CHRTBL_LINK_COUNT; i++) {
         if (table[a].link[i] != CHRTBL_LINK_NONE && table[a].link[i] == b) {
             return 1;

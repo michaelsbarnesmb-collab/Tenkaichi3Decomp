@@ -1253,6 +1253,80 @@ extern "C" {
 extern volatile int gPortUnlockAll, gPortUnlockDone;
 }
 
+extern "C" {
+#include "../../include/plat_charas.h"
+int Port_NetSession(void);
+}
+
+// Character packages (the `characters` folder next to the game; docs/port/character_packages.md): what is
+// installed, what each folder does, and what was found wrong with it.
+static void mods_tab(void) {
+    int count = Port_CharaPkgCount(), added = 0, replaced = 0, off = 0;
+    for (int i = 0; i < count; i++) {
+        const PortCharaPkg *p = Port_CharaPkg(i);
+        added += p->kind == PORT_PKG_ADDS;
+        replaced += p->kind == PORT_PKG_REPLACES;
+        off += p->kind == PORT_PKG_OFF;
+    }
+    if (Port_NetSession()) {
+        ImGui::TextWrapped("Character packages are not part of online play: an online match has the game's own characters only, "
+                           "and nothing of the \"characters\" folder is loaded.");
+        ImGui::Spacing();
+    } else if (count == 0) {
+        ImGui::TextWrapped("No character packages. A package is a folder in \"characters\" next to the game: it adds a character, "
+                           "or replaces one of the game's.");
+        return;
+    }
+    ImGui::Text("Character packages: %d added, %d replacing", added, replaced);
+    if (off > 0) {
+        ImGui::SameLine();
+        ImGui::Text("(%d not used)", off);
+    }
+    ImGui::Spacing();
+    if (!Port_NetSession()) {
+        bool pool = Port_CharaPool() != 0;
+        if (ImGui::Checkbox("Added characters in random picks", &pool)) {
+            Port_CharaPoolSet(pool);
+        }
+        ImGui::SetItemTooltip("Off: the \"random\" cell of the character select and the computer's entrants of a tournament are\n"
+                              "drawn from the game's own characters, as in the original. On: the added characters are in the draw too.\n"
+                              "The computer then plays them with the behaviour of the character each is based on.");
+        ImGui::Spacing();
+    }
+    {
+        for (int i = 0; i < count; i++) {
+            ImGui::Separator();
+            const PortCharaPkg *p = Port_CharaPkg(i);
+            ImGui::PushID(i);
+            ImGui::TextUnformatted(p->name[0] != '\0' ? p->name : p->folder);
+            ImGui::SameLine();
+            if (p->kind == PORT_PKG_ADDS) {
+                ImGui::TextDisabled("adds a character (id %d)", p->id);
+            } else if (p->kind == PORT_PKG_REPLACES) {
+                ImGui::TextDisabled("replaces character %d", p->id);
+            } else {
+                ImGui::TextDisabled("not used");
+            }
+            if (p->author[0] != '\0' || p->version[0] != '\0') {
+                ImGui::SameLine();
+                ImGui::TextDisabled("- %s%s%s", p->author, p->author[0] != '\0' && p->version[0] != '\0' ? ", " : "", p->version);
+            }
+            ImGui::Indent();
+            ImGui::TextDisabled("folder: %s", p->folder);
+            if (p->about[0] != '\0') {
+                ImGui::TextWrapped("%s", p->about);
+            }
+            if (p->problem[0] != '\0') {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.35f, 1.0f));
+                ImGui::TextWrapped("%s", p->problem);
+                ImGui::PopStyleColor();
+            }
+            ImGui::Unindent();
+            ImGui::PopID();
+        }
+    }
+}
+
 extern "C" int Port_GameSpeed(void);          // plat_stub.c: the player's own game speed, percent; never used online
 extern "C" void Port_GameSpeedSet(int percent);
 extern "C" void Port_AudioRefresh(void);
@@ -1521,7 +1595,7 @@ static void build(void) {
         open = false;
     }
     if (sForceTab < 0 && (pad_pressed(ImGuiKey_GamepadL1) || pad_pressed(ImGuiKey_GamepadR1))) {
-        sForceTab = (sTab + (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? 6 : 1)) % 7;
+        sForceTab = (sTab + (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? 7 : 1)) % 8;
         sPadTab = true;
     }
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -1582,6 +1656,7 @@ static void build(void) {
             }
             if (tab("Cheats", 5)) { cheats_tab(); ImGui::EndTabItem(); }
             if (tab("Misc", 6)) { misc_tab(); ImGui::EndTabItem(); }
+            if (tab("Mods", 7)) { mods_tab(); ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         ImGui::EndChild();

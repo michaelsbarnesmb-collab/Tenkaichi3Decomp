@@ -2,9 +2,6 @@
 #include "battle/view_b.h"
 #include "sys/common.h"
 #include "sys/save.h"
-#ifdef PORT
-#include "plat_chars.h" /* characters added past the original's 161 */
-#endif
 
 /*
  * ChrTbl / ItemSet, 0x260D20..0x2614B0: readers of the two tables of common file 4 (gCommonRes->data[2]): the
@@ -17,22 +14,27 @@ extern void *memset(void *dst, s32 c, u32 n);
 
 /* A section of common file 4. */
 #define CHRTBL_FILE ((ChrTblFile *)gCommonRes->data[2])
-#ifdef PORT
-/* (the characters' part: the port's copy, with room for added characters) */
-#define CHRTBL_SECTION(file, ofs) ((u8 *)Port_ChrTblSection((file), (u8 *)(file) + (((file)->ofs >> 2) << 2)))
-#else
 #define CHRTBL_SECTION(file, ofs) ((u8 *)(file) + (((file)->ofs >> 2) << 2))
-#endif
 
 /* Returns the character's number of costumes, and sets *costume to 0 if it is not one of them. */
 s32 ChrTbl_WrapCostume(s32 chara, s32 *costume) {
     ChrTblFile *file = CHRTBL_FILE;
     ChrTblEntry *table = (ChrTblEntry *)CHRTBL_SECTION(file, charaOffset);
 
-    if (costume != NULL && !(*costume < table[chara].costumes)) {
+#ifdef PORT
+    if (PORT_CHARA_ADDED(chara)) { /* PC build: as many costumes as the character's folder has */
+        extern int Port_CharaCostumes(int chara);
+        s32 n = Port_CharaCostumes(chara);
+        if (costume != NULL && !(*costume < n)) {
+            *costume = 0;
+        }
+        return n;
+    }
+#endif
+    if (costume != NULL && !(*costume < table[CHARA_T(chara)].costumes)) {
         *costume = 0;
     }
-    return table[chara].costumes;
+    return table[CHARA_T(chara)].costumes;
 }
 
 /* The character's cost. */
@@ -40,7 +42,7 @@ s32 ChrTbl_GetCost(s32 chara) {
     ChrTblFile *file = CHRTBL_FILE;
     ChrTblEntry *table = (ChrTblEntry *)CHRTBL_SECTION(file, charaOffset);
 
-    return table[chara].cost;
+    return table[CHARA_T(chara)].cost;
 }
 
 /* The character's level: the table's base plus the saved level of a customisation slot or of a record. */
@@ -56,7 +58,7 @@ s32 ChrTbl_GetLevel(s32 chara, s32 slot, s32 fromRec) {
     }
     file = CHRTBL_FILE;
     table = (ChrTblEntry *)CHRTBL_SECTION(file, charaOffset);
-    return table[chara].baseLevel + level;
+    return table[CHARA_T(chara)].baseLevel + level;
 }
 
 /* The experience value of the level the customisation slot has reached. */
@@ -64,7 +66,7 @@ s32 ChrTbl_GetExp(s32 chara, s32 slot) {
     ChrTblFile *file = CHRTBL_FILE;
     ChrTblEntry *table = (ChrTblEntry *)CHRTBL_SECTION(file, charaOffset);
 
-    return table[chara].exp[gSaveData->custom[slot].level];
+    return table[CHARA_T(chara)].exp[gSaveData->custom[slot].level];
 }
 
 /* The last experience value of the character's list. */
@@ -75,8 +77,8 @@ s32 ChrTbl_GetMaxExp(s32 chara) {
     s32 max = 0;
 
     for (i = 0; i < CHRTBL_EXP_COUNT; i++) {
-        if (table[chara].exp[i] != 0) {
-            max = table[chara].exp[i];
+        if (table[CHARA_T(chara)].exp[i] != 0) {
+            max = table[CHARA_T(chara)].exp[i];
         } else {
             break;
         }
@@ -196,7 +198,7 @@ void ItemSet_GetStats(u16 *ids, s32 *stats, s32 *ability, s32 chara) {
         if (chara < 0) {
             stats[4] = 0;
         } else {
-            stats[4] = charas[chara].aiType;
+            stats[4] = charas[CHARA_T(chara)].aiType;
         }
     }
 }
@@ -245,7 +247,7 @@ s32 ItemTbl_CanEquip(s32 item, s32 chara, ItemTblEntry *table) {
     }
     file = CHRTBL_FILE;
     charas = (ChrTblEntry *)CHRTBL_SECTION(file, charaOffset);
-    if (charas[chara].flags & CHRTBL_FLAG_0) {
+    if (charas[CHARA_T(chara)].flags & CHRTBL_FLAG_0) {
         if (flags & ITEMTBL_FLAG_8) {
             return 1;
         }
