@@ -72,6 +72,25 @@ void MsgWin_Draw(s32 unused0, s32 unused1, s32 line) {
     Font_FlushAll();
 }
 
+#ifdef PORT
+/* The same with a text of the PC port's own in place of a line of the text file (the options' voice help when
+   there is a third voice language, port/src/plat_slus21978.c). */
+void MsgWin_DrawString(u16 *str) {
+    extern void TextBox_AttachString(Flash *flash, FlashRef *ref, s32 x, s32 y, u16 *str, TextBox *box);
+    FlashRef ref;
+    Flash *flash;
+
+    Flash_Advance(gMsgWin->flash);
+    flash = gMsgWin->flash;
+    if (gMsgWin->text != NULL) {
+        Flash_FindLabel(flash, NULL, "mc_message_text", &ref);
+        TextBox_AttachString(flash, &ref, 0, 0, str, &gMsgWin->box);
+    }
+    Flash_Draw(gMsgWin->flash);
+    Font_FlushAll();
+}
+#endif
+
 /* Starts the slide-in animation of the window's side. */
 void MsgWin_Open(void) {
     if (gMsgWin->side == 0) {

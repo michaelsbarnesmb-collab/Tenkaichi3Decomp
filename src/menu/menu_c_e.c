@@ -630,7 +630,7 @@ void CharSel_Init(s32 section) {
         added = Port_NetSession() ? 0 : gPortSongCount;
         sPortSongsAdded = 0;
         if (added > 0) {
-            static s32 sBgmIds[72];
+            static s32 sBgmIds[PORT_SONG_MAX + 32];
             s32 n = gCharSel->bgmCount, k, last = gCharSel->bgmIds[n - 1];
             if (n > 30) {
                 n = 30;
