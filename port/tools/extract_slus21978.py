@@ -8,6 +8,8 @@ Result: data_dir/slus21978/pzs3us2/NNNNN.bin (voice lines) and data_dir/slus2197
 per file the patch has in Spanish, named as the file of the original's English it replaces, and data_dir/slus21978/source.txt.
 The game plays those instead when the voice language "Spanish (Latin America)" is chosen (port/src/gs/snd_adx.c).
 Also data_dir/slus21978/songs/: the patch's music, added to the music select whatever the voice language.
+And data_dir/characters/SLUS-21978 <name>/: the characters the patch adds, as character packages
+(port/tools/slus21978_chars.py; --chars=<c>,<c>... takes only those).
 
 How the patch keeps its data (worked out from its disc, nothing documented):
 - Its four archives DATA/PZS4US0..3.AFS have no AFS header: the tables of contents of all four are in BIN/DBZ4.BIN,
