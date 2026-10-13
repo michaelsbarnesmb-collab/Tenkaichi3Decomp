@@ -28,6 +28,7 @@ static s32 CsModel_Busy(void);
 static s32 CsModel_Shown(s32 side);
 static void CsModel_Term(void);
 static void CsModel_Update(void);
+static void CsModel_DrawHint(void);
 #endif
 
 /*
@@ -866,6 +867,7 @@ void CharSel_Draw(void) {
     }
 #ifdef PORT
     CsModel_Update(); /* the models: over the stage picture, under the rest of the screen */
+    CsModel_DrawHint();
 #endif
 
     f = &gCharSel->flash[0];
@@ -1935,6 +1937,9 @@ typedef struct CsModelInfo {
 #define CSM_SIDE_X 0.37f     /* how far to the side, per unit of distance */
 #define CSM_UP (-0.08f) /* upwards (y points down), per unit of distance */
 #define CSM_OBJ_FLAGS 0xA40
+#define CSM_HINT_X0 0x98   /* where the hint starts on each side: it ends by the left name's end, starts at the right one's start */
+#define CSM_HINT_X1 0x10C
+#define CSM_HINT_Y 0x10C
 
 enum { CSM_IDLE, CSM_READ, CSM_SETTLE };
 
@@ -2237,6 +2242,35 @@ static void CsModel_Update(void) {
         Ot_Draw();
         Gfx_MarkPass(0);
     }
+}
+
+/* "[Square] Preview" over each side's name plate that Square works for, in the game's font with its own button
+   icon (the printer's <PAD=> tag; U+25A1 is the square's name in the icon table). */
+static void CsModel_DrawHint(void) {
+    extern FontStyle gFontStyle;
+    extern void Font_PrintAt(s32 x, s32 y, u16 *str);
+    static u16 text[] = { '<', 'P', 'A', 'D', '=', 0x25A1, '>', ' ', 'P', 'r', 'e', 'v', 'i', 'e', 'w', 0 };
+    FontStyle saved;
+    s32 i;
+
+    if (Port_NetSession() || (gCharSel->flags & CHARSEL_STAGE_PHASE) || !(gCharSel->flash[0].flags & MFLASH_PAD)) {
+        return;
+    }
+    saved = gFontStyle;
+    gFontStyle.scale = 0.8f;
+    gFontStyle.color = 0x80FFFFFF;
+    gFontStyle.shadowMode = FONT_SHADOW_DROP;
+    gFontStyle.shadowColor = 0x80000000;
+    gFontStyle.shadowDx = 1;
+    gFontStyle.shadowDy = 1;
+    gFontStyle.align = FONT_ALIGN_LEFT;
+    for (i = 0; i < 2; i++) {
+        if (gCharSel->players != 1 && gCharSel->turn != i) {
+            continue;
+        }
+        Font_PrintAt(i == 0 ? CSM_HINT_X0 : CSM_HINT_X1, CSM_HINT_Y, text);
+    }
+    gFontStyle = saved;
 }
 #endif
 
