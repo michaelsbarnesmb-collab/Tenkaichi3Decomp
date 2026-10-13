@@ -2199,11 +2199,7 @@ static void CsModel_Update(void) {
         BtlObjAnim_PlayModel(obj, test >= 0 && (test >> 4) != 0 ? test >> 4 : CSM_ANIM, 2);
         *(u32 *)(obj + CSM_OBJ_FLAGS) &= ~0x02000000;
         BtlObj_SetPartVisible(obj, 0, 0);
-        {
-            CsModelInfo *info = CsModel_Info(sCsm.chara[i]);
-            fprintf(stderr, "bt3: character select: model of %d, costume %d (target %.2f, distance %.2f)\n", sCsm.chara[i],
-                   sCsm.costume[i], info != NULL ? info->targetY : -1.0f, info != NULL ? info->dist : -1.0f);
-        }
+        fprintf(stderr, "bt3: character select: model of %d, costume %d\n", sCsm.chara[i], sCsm.costume[i]);
         sCsm.count = 0;
         sCsm.state = CSM_SETTLE;
         break;
