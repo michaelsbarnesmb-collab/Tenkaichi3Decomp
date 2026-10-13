@@ -212,6 +212,28 @@ def name_sheets(res, part):
 CHARS = None  # --chars=<c>,<c>...: only these of the added characters (default: all)
 
 
+def character_tables(res):
+    """The character select's names, grid and chips, from its resources (section 2 of the menu archive 0x1C1)."""
+    text = pack_at(res, 43)
+    names = {}
+    for c in range(struct.unpack_from("<I", res, text)[0]):
+        p = text + (struct.unpack_from("<I", res, text + 4 * (c + 1))[0] >> 2 << 2)
+        end = p
+        while struct.unpack_from("<H", res, end)[0]:
+            end += 2
+        names[c] = res[p:end].decode("utf-16-le").lstrip("\ufeff")
+    cells = pack_at(res, 42)
+    grid = []
+    for i in range(struct.unpack_from("<I", res, cells)[0]):
+        cid, count, *forms = struct.unpack_from("<9i", res, cells + 0x10 + i * 0x24)
+        grid.append(list(forms[:count]) if count else [cid])
+    chip = pack_at(res, 45)
+    n = struct.unpack_from("<I", res, chip)[0]
+    offsets = [chip + (struct.unpack_from("<I", res, chip + 4 * (i + 1))[0] >> 2 << 2) for i in range(n)] + [pack_at(res, 46)]
+    chips = {c: res[offsets[c]:offsets[c + 1]] for c in range(n)}
+    return names, grid, chips
+
+
 def main():
     global CHARS
     for a in [a for a in sys.argv[1:] if a.startswith("--chars=")]:
@@ -396,8 +418,9 @@ def main():
                                      "".join(line + "\n" for line in listing))
     (songs / "names.rgba").write_bytes(struct.pack("<III", 512, 32, 2 * len(rows)) + b"".join(rows) + b"".join(lit_rows))
     print(f"  music: {len(listing)} tracks with their names -> {songs}")
-    # the characters the patch adds (port/tools/slus21978_chars.py); their names: part 43 of the same resources, a
-    # pack of UTF-16 lines, line c the name of character c
+    # the characters the patch adds, as character packages (port/tools/slus21978_chars.py). From the same resources:
+    # part 43 their names (a pack of UTF-16 lines, line c the name of character c), part 42 the grid of the select
+    # (cells of 0x24 bytes from +0x10: id, number of forms, seven forms), part 45 their chips (entry c + 1)
     import slus21978_chars
     toc3 = {name: (iso.find("DATA/" + name.upper()), toc[name]) for name in toc}
 
@@ -409,16 +432,11 @@ def main():
         iso.f.seek(lba * SECTOR + offset)
         return iso.f.read(sectors * SECTOR)
 
-    text = pack_at(res, 43)
-    names = {}
-    for c in range(struct.unpack_from("<I", res, text)[0]):
-        p = text + (struct.unpack_from("<I", res, text + 4 * (c + 1))[0] >> 2 << 2)
-        end = p
-        while struct.unpack_from("<H", res, end)[0]:
-            end += 2
-        names[c] = res[p:end].decode("utf-16-le").lstrip("\ufeff")
+    names, grid, chips = character_tables(res)
     which = [int(c) for c in CHARS.split(",")] if CHARS else None
-    print(f"  characters: {slus21978_chars.extract(read, bpe_decode, data, names, which)} -> {data / 'slus21978' / 'chars'}")
+    bt3_of = {m: c for c, m in mapping.items()}
+    taken = slus21978_chars.extract(read, bpe_decode, data, names, grid, chips, bt3_of, which)
+    print(f"  characters: {taken} -> {data / 'characters'}")
     (data / "slus21978" / "source.txt").write_text(
         "The patch SLUS-21978: Spanish (Latin America) voices and music\n" +
         "".join(f"character {c} = {m}\n" for c, m in sorted(moved.items())))
