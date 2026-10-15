@@ -201,6 +201,7 @@ def main_win():
     shutil.copy2(ROOT / "port/third_party/newlib_libm/COPYING.NEWLIB", lic / "newlib.txt")
     shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
     shutil.copy2(ROOT / "port/third_party/dr_libs/LICENSE", lic / "dr_mp3.txt")
+    shutil.copy2(ROOT / "port/third_party/miniz/LICENSE", lic / "miniz.txt")
 
     take_fonts(out, lic)
     take_tbo_art(out, lic)
@@ -248,6 +249,7 @@ def main():
     shutil.copy2(ROOT / "port/third_party/newlib_libm/COPYING.NEWLIB", lic / "newlib.txt")
     shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
     shutil.copy2(ROOT / "port/third_party/dr_libs/LICENSE", lic / "dr_mp3.txt")
+    shutil.copy2(ROOT / "port/third_party/miniz/LICENSE", lic / "miniz.txt")
 
     take_fonts(OUT, lic)
     take_tbo_art(OUT, lic)

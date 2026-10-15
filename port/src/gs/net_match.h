@@ -27,6 +27,8 @@ void Match_QueuesAsk(int version);
 void Match_HelloAsk(void);
 void Match_UpdateAsk(void);   /* asks GitHub for the newest release (a thread; once is enough) */
 int Match_UpdateLatest(void); /* its number as PORT_RELEASE counts, 0 while unknown */
+const char *Match_UpdateTag(void); /* tag name string e.g. "v0.1.35.1", or "" */
+int Match_UpdateHasNewer(void);    /* 1 if GitHub release is newer than current, 0 otherwise */
 int Match_Release(int *min, int *latest);
 int Match_QueueWaiting(int queue);
 void Match_Poll(MatchStatus *out);

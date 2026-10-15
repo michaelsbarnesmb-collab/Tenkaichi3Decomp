@@ -781,7 +781,8 @@ static int SDLCALL queues_thread(void *arg) {
 /* ---- is there a newer release? asked of GitHub, once per run, when the window is there ("Check for updates") ----
    One GET of the repository's newest published release (drafts and pre-releases are not it); nothing is sent but
    the request itself. The answer is long; the tag's name is near its start, and only the start is kept. */
-static SDL_AtomicInt sUpdLatest, sUpdBusy;
+static char sLatestTag[32] = "";
+static SDL_AtomicInt sUpdLatest, sUpdBusy, sUpdHasNewer;
 
 static int SDLCALL update_thread(void *arg) {
     static char answer[4096];
@@ -810,10 +811,33 @@ static int SDLCALL update_thread(void *arg) {
         }
     }
     if (ok && (p = SDL_strstr(answer, "\"tag_name\"")) != NULL && (p = SDL_strchr(p + 10, 'v')) != NULL) {
-        int a = 0, b = 0, c = 0;
-        if (SDL_sscanf(p, "v%d.%d.%d", &a, &b, &c) == 3 && a == 0 && b >= 0 && c >= 0 && c < 100) {
+        const char *q = SDL_strchr(p, '"');
+        if (q != NULL && (size_t)(q - p) < sizeof(sLatestTag)) {
+            size_t len = (size_t)(q - p);
+            SDL_memcpy(sLatestTag, p, len);
+            sLatestTag[len] = '\0';
+        }
+        int a = 0, b = 0, c = 0, d = 0;
+        int n = SDL_sscanf(p, "v%d.%d.%d.%d", &a, &b, &c, &d);
+        if (n < 4) {
+            d = 0;
+            n = SDL_sscanf(p, "v%d.%d.%d", &a, &b, &c);
+        }
+        if (n >= 3 && a == 0 && b >= 0 && c >= 0 && c < 100) {
             SDL_SetAtomicInt(&sUpdLatest, b * 100 + c); /* as PORT_RELEASE counts: 0.1.33 is 133 */
-            fprintf(stderr, "bt3: update check: the newest release is 0.%d.%d, this is 0.%d.%d\n", b, c, PORT_RELEASE / 100, PORT_RELEASE % 100);
+            int local_b = PORT_RELEASE / 100;
+            int local_c = PORT_RELEASE % 100;
+#ifdef PORT_SUBRELEASE
+            int local_d = PORT_SUBRELEASE;
+#else
+            int local_d = 0;
+#endif
+            int is_newer = (b > local_b) ||
+                           (b == local_b && c > local_c) ||
+                           (b == local_b && c == local_c && d > local_d);
+            SDL_SetAtomicInt(&sUpdHasNewer, is_newer ? 1 : 0);
+            fprintf(stderr, "bt3: update check: the newest release is %s, this is v0.%d.%d%s%d\n",
+                    sLatestTag, local_b, local_c, local_d > 0 ? "." : "", local_d > 0 ? local_d : 0);
         }
     }
     if (SDL_GetAtomicInt(&sUpdLatest) == 0) {
@@ -840,6 +864,14 @@ void Match_UpdateAsk(void) {
 /* The newest published release's number (0: not asked, no answer yet, or none). */
 int Match_UpdateLatest(void) {
     return SDL_GetAtomicInt(&sUpdLatest);
+}
+
+const char *Match_UpdateTag(void) {
+    return sLatestTag;
+}
+
+int Match_UpdateHasNewer(void) {
+    return SDL_GetAtomicInt(&sUpdHasNewer);
 }
 
 /* ---- is this release new enough? asked when the online screen opens ---- */

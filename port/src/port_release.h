@@ -4,6 +4,7 @@
 #ifndef PORT_RELEASE_H
 #define PORT_RELEASE_H
 #define PORT_RELEASE 135
+#define PORT_SUBRELEASE 0
 /* Where releases are published: the game asks GitHub for the newest one's number once per start (gs/net_match.c,
    "Check for updates") and opens this repository's release page from the settings window. A fork that publishes
    its own releases names its own repository here. */

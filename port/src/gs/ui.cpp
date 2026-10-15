@@ -16,6 +16,7 @@
 #include "menu_text.h"
 #include "../quit_dialog.h"
 #include "net_chat.h"
+#include "net_update.h"
 
 static int sMeter = -1; // the meter (frame rate, connection): -1 not read yet
 static bool meter_on(void);
@@ -36,6 +37,8 @@ extern "C" int PortInput_TboEvent(const SDL_Event *ev);
 extern "C" void PortInput_TboClipboard(void);      // ... and its "Copy Code": onto the clipboard, from this thread
 void Match_UpdateAsk(void);                    // net_match.c: asks GitHub for the newest release, once
 int Match_UpdateLatest(void);                  // ... its number (0.1.33 is 133), 0 while unknown
+const char *Match_UpdateTag(void);
+int Match_UpdateHasNewer(void);
 int Port_Menus43(void);                       // plat_stub.c: the menus are shown at 4:3 in a wider picture
 int Port_LateInput(void);                     // plat_stub.c: "Low input lag", the blanks are waited for before the pad read
 void Port_LateInputSet(int on);
@@ -365,6 +368,7 @@ int Ui_Init(SDL_Window *window, SDL_GPUDevice *device, void *gl_context, const c
     io.IniFilename = NULL; // no window-layout file next to the game
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad; // (a controller opens it too: START + SELECT)
     style();
+    PortUpdate_Cleanup();
     for (size_t i = 0; i < sizeof(fonts) / sizeof(fonts[0]); i++) {
         FILE *fp = fopen(fonts[i], "rb");
         if (fp != NULL) {
@@ -589,6 +593,56 @@ static void quick_status(int state, int &lastState, const char *name) {
     }
 }
 
+static void update_widget(int targetRelease, bool neededForOnline) {
+    PortUpdateStatus st = PortUpdate_GetStatus();
+    if (st == PORT_UPDATE_IDLE) {
+        if (neededForOnline) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.35f, 1.0f));
+            ImGui::TextWrapped("Update available. Online servers are unreachable until you update.");
+            ImGui::PopStyleColor();
+        }
+        if (ImGui::Button("Update now")) {
+            PortUpdate_Start(targetRelease);
+        }
+        ImGui::SetItemTooltip("Download and install the update automatically.");
+        ImGui::SameLine();
+        if (ImGui::Button("Download page")) {
+            SDL_OpenURL("https://github.com/" PORT_UPDATE_REPO "/releases/latest");
+        }
+        ImGui::SetItemTooltip("Opens the release page in your browser.");
+    } else if (st == PORT_UPDATE_DOWNLOADING) {
+        float prog = PortUpdate_GetProgress();
+        size_t got = 0, total = 0;
+        PortUpdate_GetBytes(&got, &total);
+        char progBuf[64];
+        if (total > 0) {
+            SDL_snprintf(progBuf, sizeof(progBuf), "Downloading: %.1f MB / %.1f MB", (float)got / 1048576.0f, (float)total / 1048576.0f);
+        } else {
+            SDL_snprintf(progBuf, sizeof(progBuf), "Downloading: %.1f MB", (float)got / 1048576.0f);
+        }
+        ImGui::ProgressBar(prog, ImVec2(240.0f, 0.0f), progBuf);
+    } else if (st == PORT_UPDATE_EXTRACTING) {
+        ImGui::TextColored(ImVec4(0.4f, 0.85f, 1.0f, 1.0f), "Extracting update files...");
+    } else if (st == PORT_UPDATE_READY) {
+        ImGui::TextColored(ImVec4(0.35f, 1.0f, 0.45f, 1.0f), "Update ready!");
+        ImGui::SameLine();
+        if (ImGui::Button("Restart game")) {
+            PortUpdate_Restart();
+        }
+        ImGui::SetItemTooltip("Relaunches the game with the new update applied.");
+    } else if (st == PORT_UPDATE_ERROR) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s", PortUpdate_GetError());
+        ImGui::SameLine();
+        if (ImGui::Button("Retry")) {
+            PortUpdate_Start(targetRelease);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Download page")) {
+            SDL_OpenURL("https://github.com/" PORT_UPDATE_REPO "/releases/latest");
+        }
+    }
+}
+
 static void build_net(void) {
     static char name[17] = "Player", address[64] = "", port[8] = "7000";
     static int tab, roll = -1, delay = 1, battle = -1, timeLimit = 3, speed = -1;
@@ -606,15 +660,11 @@ static void build_net(void) {
     if (ImGui::Begin("Dragon Net Battle", &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize)) {
         {
             int min = 0, latest = 0, mine = Port_LobbyRelease(&min, &latest);
-            if (min > mine) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.55f, 0.35f, 1.0f));
-                ImGui::TextWrapped("Update available. Online servers are unreachable until you update.");
-                ImGui::PopStyleColor();
-                ImGui::TextDisabled("You have 0.%d.%d; 0.%d.%d or newer is needed. github.com/z3xox/Tenkaichi3Decomp/releases", mine / 100, mine % 100, min / 100, min % 100);
-                ImGui::Separator();
-            } else if (latest > mine) {
-                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Update available: release 0.%d.%d.", latest / 100, latest % 100);
-                ImGui::TextDisabled("github.com/z3xox/Tenkaichi3Decomp/releases");
+            PortUpdateStatus updSt = PortUpdate_GetStatus();
+            if (min > mine || latest > mine || updSt != PORT_UPDATE_IDLE) {
+                int target = latest > mine ? latest : min;
+                if (target == 0) target = PORT_RELEASE + 1;
+                update_widget(target, min > mine);
                 ImGui::Separator();
             }
         }
@@ -1247,7 +1297,14 @@ static void misc_tab(void) {
             Port_SettingsWrite();
         }
         ImGui::SetItemTooltip("Once per start, ask GitHub for the number of the newest release and say so if it is newer\n"
-                              "than this one. Nothing is downloaded: the settings window then has a button to the page.");
+                              "than this one. If an update is available, you can install it automatically.");
+        ImGui::SameLine();
+#if defined(PORT_SUBRELEASE) && PORT_SUBRELEASE > 0
+        ImGui::TextDisabled("(installed: v0.%d.%d.%d)", PORT_RELEASE / 100, PORT_RELEASE % 100, PORT_SUBRELEASE);
+#else
+        ImGui::TextDisabled("(installed: v0.%d.%d)", PORT_RELEASE / 100, PORT_RELEASE % 100);
+#endif
+        ImGui::SetItemTooltip("The version of Tenkaichi3Decomp currently running.");
     }
     // the start of the game (PR #50): read by FirstRun_Main, so they count from the next start
     static int sSkipLogos = -1, sSkipIntro = -1, sSkipCopy = -1;
@@ -1679,15 +1736,25 @@ static void build(void) {
     if (ImGui::Begin("Settings", &open, ImGuiWindowFlags_NoCollapse)) {
         {
             int latest = update_latest();
-            if (latest > PORT_RELEASE) {
+            bool hasUpdate = Match_UpdateHasNewer() || (latest > PORT_RELEASE);
+            PortUpdateStatus updSt = PortUpdate_GetStatus();
+            if (hasUpdate || updSt != PORT_UPDATE_IDLE) {
+                const char *tag = Match_UpdateTag();
                 ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Update available: 0.%d.%d (this is 0.%d.%d).", latest / 100, latest % 100,
-                                   PORT_RELEASE / 100, PORT_RELEASE % 100);
-                ImGui::SameLine();
-                if (ImGui::Button("Download page")) {
-                    SDL_OpenURL("https://github.com/" PORT_UPDATE_REPO "/releases/latest");
+                if (tag != NULL && tag[0] != '\0') {
+#if defined(PORT_SUBRELEASE) && PORT_SUBRELEASE > 0
+                    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Update available: %s (installed: v0.%d.%d.%d).", tag,
+                                       PORT_RELEASE / 100, PORT_RELEASE % 100, PORT_SUBRELEASE);
+#else
+                    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Update available: %s (installed: v0.%d.%d).", tag,
+                                       PORT_RELEASE / 100, PORT_RELEASE % 100);
+#endif
+                } else {
+                    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.3f, 1.0f), "Update available: 0.%d.%d (installed: 0.%d.%d).", latest / 100, latest % 100,
+                                       PORT_RELEASE / 100, PORT_RELEASE % 100);
                 }
-                ImGui::SetItemTooltip("Opens the release page in your browser. To update, copy the new files over the old ones.");
+                ImGui::SameLine();
+                update_widget(latest > PORT_RELEASE ? latest : PORT_RELEASE + 1, false);
                 ImGui::Separator();
             }
         }
@@ -2125,10 +2192,15 @@ static bool frame_build(void) {
         gPortNetMenuRequest = 0;
         net_open();
     }
-    if (sReady && !sUpdTold && update_latest() > PORT_RELEASE && SDL_GetTicks() >= sNoticeUntil) {
+    if (sReady && !sUpdTold && (Match_UpdateHasNewer() || update_latest() > PORT_RELEASE) && SDL_GetTicks() >= sNoticeUntil) {
         int latest = update_latest(); // (told once, and not over another notice)
+        const char *tag = Match_UpdateTag();
         sUpdTold = true;
-        SDL_snprintf(sNotice, sizeof(sNotice), "Update available: 0.%d.%d. F1 for the download page.", latest / 100, latest % 100);
+        if (tag != NULL && tag[0] != '\0') {
+            SDL_snprintf(sNotice, sizeof(sNotice), "Update available: %s. F1 for settings.", tag);
+        } else {
+            SDL_snprintf(sNotice, sizeof(sNotice), "Update available: 0.%d.%d. F1 for settings.", latest / 100, latest % 100);
+        }
         sNoticeUntil = SDL_GetTicks() + 10000;
     }
     bool notice = sNotice[0] != '\0' && SDL_GetTicks() < sNoticeUntil;
