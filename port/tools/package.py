@@ -13,6 +13,7 @@ Contents:  Tenkaichi3Decomp, Tenkaichi3Decomp.dat   the game without the data ta
            a11y_<code>.txt the screen reader's lines in other languages (port/lang; its own labels, no game text)
 
            fonts/          the fonts of F1 > UI with their licences (port/third_party/fonts as it is)
+           tbo/ui/         the pictures of the Tenkaichi Budokai Online screens (port/tbo/ui), their credits in licenses/
            README.txt, licenses/
 The user needs nothing but their disc image. Nothing from the disc is in the zip."""
 import os, pathlib, re, shutil, subprocess, sys, zipfile
@@ -45,6 +46,10 @@ and the fight's gauges are spoken and shown in braille. a11y_es.txt is its Spani
 a11y_<code>.txt of the same kind, and lines of your own go into a11y_<code>_own.txt, which no update replaces.
 
 This package contains no game data. The game's data comes from your disc and stays on your computer.
+
+The port's own code is under the GNU AGPL, version 3 (licenses/tenkaichi3decomp-agpl.txt; code from before the
+change of licence also under MIT, licenses/tenkaichi3decomp-mit.txt). Its source, this release's tag included:
+https://github.com/z3xox/Tenkaichi3Decomp
 """
 
 WIN_README = README.replace("(Linux, 64-bit)", "(Windows, 64-bit)").replace("Start  Tenkaichi3Decomp-setup\n", "Start  Tenkaichi3Decomp-setup.exe\n") \
@@ -134,6 +139,14 @@ def take_fonts(out, lic):
             if p.name == "LICENSE":
                 shutil.copy2(p, lic / f"{p.parent.name}-fonts.txt")
 
+def take_tbo_art(out, lic):
+    """The pictures of the Tenkaichi Budokai Online screens, and who made them (port/tbo/ui/CREDITS.md)."""
+    src = ROOT / "port/tbo/ui"
+    (out / "tbo/ui").mkdir(parents=True, exist_ok=True)
+    for p in sorted(src.glob("*.png")):
+        shutil.copy2(p, out / "tbo/ui" / p.name)
+    shutil.copy2(src / "CREDITS.md", lic / "tbo-ui-credits.txt")
+
 def bundle_sdl_dependencies(dll, out, lic, prefix):
     """MSYS2 SDL can import libiconv; the official SDL archive is self-contained.
     Collect vendor DLLs from the SDL bin folder, never Windows system DLLs."""
@@ -182,12 +195,15 @@ def main_win():
     lic = out / "licenses"
     lic.mkdir()
     bundle_sdl_dependencies(dll, out, lic, toolchain.PREFIX)
+    shutil.copy2(ROOT / "LICENSE", lic / "tenkaichi3decomp-agpl.txt")
+    shutil.copy2(ROOT / "LICENSE-MIT", lic / "tenkaichi3decomp-mit.txt")
     shutil.copy2(ROOT / "port/third_party/imgui/LICENSE.txt", lic / "dear-imgui.txt")
     shutil.copy2(ROOT / "port/third_party/newlib_libm/COPYING.NEWLIB", lic / "newlib.txt")
     shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
     shutil.copy2(ROOT / "port/third_party/dr_libs/LICENSE", lic / "dr_mp3.txt")
 
     take_fonts(out, lic)
+    take_tbo_art(out, lic)
     (out / "textures").mkdir()
     (out / "textures/README.txt").write_text(TEXTURES_NOTE.replace("\n", "\r\n"))
     for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
@@ -226,12 +242,15 @@ def main():
     (OUT / "README.txt").write_text(README)
     lic = OUT / "licenses"
     lic.mkdir()
+    shutil.copy2(ROOT / "LICENSE", lic / "tenkaichi3decomp-agpl.txt")
+    shutil.copy2(ROOT / "LICENSE-MIT", lic / "tenkaichi3decomp-mit.txt")
     shutil.copy2(ROOT / "port/third_party/imgui/LICENSE.txt", lic / "dear-imgui.txt")
     shutil.copy2(ROOT / "port/third_party/newlib_libm/COPYING.NEWLIB", lic / "newlib.txt")
     shutil.copy2(ROOT / "port/third_party/xxhash/LICENSE", lic / "xxhash.txt")
     shutil.copy2(ROOT / "port/third_party/dr_libs/LICENSE", lic / "dr_mp3.txt")
 
     take_fonts(OUT, lic)
+    take_tbo_art(OUT, lic)
     (OUT / "textures").mkdir()
     (OUT / "textures/README.txt").write_text(TEXTURES_NOTE)
     for kind, note in (("stages", STAGES_NOTE), ("songs", SONGS_NOTE)):
