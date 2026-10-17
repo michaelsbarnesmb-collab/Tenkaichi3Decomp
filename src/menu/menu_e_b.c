@@ -701,7 +701,7 @@ void TeamSel_Init(s32 section) {
         sPortSongsAdded = 0;
         Port_NameFontSheets((int)(u32)gTeamSel->tex[39], (int)(u32)gTeamSel->tex[19], (int)(u32)gTeamSel->tex[20]);
         if (added > 0) {
-            static s32 sBgmIds[72];
+            static s32 sBgmIds[PORT_SONG_MAX + 32];
             s32 n = gTeamSel->bgmCount, k, last = gTeamSel->bgmIds[n - 1];
             if (n > 30) {
                 n = 30;

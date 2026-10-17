@@ -423,14 +423,26 @@ static void stop(Player *p) {
    Checked against the disc: every id of these ranges and its partner are streams. */
 static const char *voice_own_path(const char *path, char *buf, size_t size) {
     extern int Port_NetVoiceAlt(void); /* net.c */
+    extern int Port_VoiceLatino(void), Port_Slus21978VoicePath(int fid, char *buf, int size); /* plat_slus21978.c */
     const char *dir = strstr(path, "pzs3us2/"), *num;
     int fid, id, other = 0;
 
-    if (dir == NULL || !Port_NetVoiceAlt()) {
+    if (dir == NULL) {
         return path;
     }
     num = dir + 8;
     if (sscanf(num, "%d.bin", &fid) != 1) {
+        return path;
+    }
+    /* Spanish (Latin America), from the patch SLUS-21978 (plat_slus21978.c): the English line's Spanish file,
+       when the patch has one */
+    if (Port_VoiceLatino() && Port_Slus21978VoicePath(fid, buf, (int)size)) {
+        if (getenv("BT3_SND_VERBOSE") != NULL) {
+            fprintf(stderr, "adx: voice %#x played in Spanish (%s)\n", fid + 0xD48, buf);
+        }
+        return buf;
+    }
+    if (!Port_NetVoiceAlt()) {
         return path;
     }
     id = fid + 0xD48;

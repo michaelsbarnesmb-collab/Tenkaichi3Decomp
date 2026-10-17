@@ -36,7 +36,7 @@ static char *trim(char *s) {
 }
 
 static char sDir[256]; /* the folder the songs are in (plat_extras.c) */
-static char sFiles[PORT_SONG_MAX][128];
+static char sFiles[PORT_SONG_MAX][160]; /* each one's folder and file */
 
 extern int PortExtras_Dir(const char *kind, const char *env, char *out, unsigned size);
 extern int PortExtras_Scan(const char *dir, const char *ext, char names[][128], int max);
@@ -51,12 +51,15 @@ const char *PortSongs_Dir(void) {
     return sDir;
 }
 
-/* Adds one song: its place in the music list, its name, and the file the game's id for it stands for. */
-static void add_song(const char *file, const char *name) {
+/* Adds one song of folder `dir`: its place in the music list, its name, and the file the game's id for it stands
+   for. */
+static void add_song(const char *dir, const char *file, const char *name) {
+    char full[sizeof(sFiles[0])];
     int i, offset, index;
 
+    snprintf(full, sizeof(full), "%s/%s", dir, file);
     for (i = 0; i < gPortSongCount; i++) {
-        if (strcmp(sFiles[i], file) == 0) {
+        if (strcmp(sFiles[i], full) == 0) {
             return;
         }
     }
@@ -64,19 +67,19 @@ static void add_song(const char *file, const char *name) {
         fprintf(stderr, "bt3: songs: more than %d added, %s is left out\n", PORT_SONG_MAX, file);
         return;
     }
-    if (strlen(file) >= sizeof(sFiles[0]) || strlen(sDir) + 1 + strlen(file) >= sizeof(sAliases[0].target)) {
+    if (strlen(dir) + 1 + strlen(file) >= sizeof(sFiles[0]) || strlen(dir) + 1 + strlen(file) >= sizeof(sAliases[0].target)) {
         /* (cut short, the name was that of no file: the song was in the list and silent) */
         fprintf(stderr, "bt3: songs: %s is left out: the folder and the name together are too long\n", file);
         return;
     }
     i = gPortSongCount;
-    snprintf(sFiles[i], sizeof(sFiles[i]), "%s", file);
+    snprintf(sFiles[i], sizeof(sFiles[i]), "%s", full);
     offset = PORT_SONG_FIRST_OFFSET + i;
     index = PORT_SONG_FILE_INDEX + i; /* PORT_BGM_FILE(offset), as an index of the second archive */
     gPortSongOffsets[i] = offset;
     snprintf(gPortSongNames[i], 64, "%s", name);
     snprintf(sAliases[sAliasCount].rel, sizeof(sAliases[sAliasCount].rel), "pzs3us2/%05d.bin", index);
-    snprintf(sAliases[sAliasCount].target, sizeof(sAliases[sAliasCount].target), "%s/%s", sDir, file);
+    snprintf(sAliases[sAliasCount].target, sizeof(sAliases[sAliasCount].target), "%s", full);
     sAliasCount++;
     gPortSongCount++;
 }
@@ -116,7 +119,7 @@ static void collect(void) {
                 fclose(f);
                 file = adx;
             }
-            add_song(file, trim(bar + 1));
+            add_song(sDir, file, trim(bar + 1));
         }
     }
     if (fp != NULL) {
@@ -128,9 +131,54 @@ static void collect(void) {
         for (k = 0; k < n; k++) {
             char name[64];
             PortExtras_NameFromFile(found[k], name, sizeof(name));
-            add_song(found[k], name);
+            add_song(sDir, found[k], name);
         }
     }
+}
+
+/* The music of the patch SLUS-21978, when the player took it from their disc image (port/tools/extract_slus21978.py):
+   <data>/slus21978/songs, its list songs.txt in the order of that disc. After the player's own songs. */
+static char sSlusDir[256];
+static int sSlusFirst = -1, sSlusCount;
+
+static void add_slus21978(void) {
+    char *dir = sSlusDir, path[300], line[256];
+    int before = gPortSongCount;
+    FILE *fp;
+
+    snprintf(sSlusDir, sizeof(sSlusDir), "%s/slus21978/songs", data_root());
+    snprintf(path, sizeof(path), "%s/songs.txt", dir);
+    fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return;
+    }
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *bar = strchr(line, '|');
+        if (line[0] == '#' || bar == NULL) {
+            continue;
+        }
+        *bar = '\0';
+        add_song(dir, trim(line), trim(bar + 1));
+    }
+    fclose(fp);
+    if (gPortSongCount > before) {
+        sSlusFirst = before;
+        sSlusCount = gPortSongCount - before;
+        fprintf(stderr, "bt3: songs: %d of the patch SLUS-21978 added from %s\n", gPortSongCount - before, dir);
+    }
+}
+
+/* Where the patch's songs are in the added list, and their folder (its names.rgba: their name pictures, taken from
+   the patch's own menu by extract_slus21978.py, for the overlay). first is -1 without them. */
+int PortSongs_Slus21978(int *first, int *count) {
+    PortSongs_Init();
+    *first = sSlusFirst;
+    *count = sSlusCount;
+    return sSlusFirst >= 0;
+}
+
+const char *PortSongs_Slus21978Dir(void) {
+    return sSlusDir;
 }
 
 static int sMadeSeen; /* PortSongs_Mp3Made() when the folder was last read */
@@ -141,6 +189,8 @@ void PortSongs_Init(void) {
     }
     sDone = 1;
     if (!PortExtras_Dir("songs", "BT3_SONGS", sDir, sizeof(sDir))) {
+        sDir[0] = '\0';
+        add_slus21978();
         return;
     }
     PortSongs_Mp3Start(sDir);
@@ -149,6 +199,7 @@ void PortSongs_Init(void) {
     if (gPortSongCount > 0) {
         fprintf(stderr, "bt3: songs: %d added from %s\n", gPortSongCount, sDir);
     }
+    add_slus21978();
 }
 
 /* The songs whose conversion from MP3 has finished since the list was last made join it (song_mp3.c). Called by

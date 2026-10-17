@@ -17,7 +17,7 @@ extern void Port_StateTouch(void *p, unsigned long n); /* gs/state.c */
 extern const char *Port_FileRoot(void); /* plat_file.c: BT3_DATA or "gamedata" */
 
 enum { SLOTS = 32 };
-static struct { char rel[128]; FILE *fp; long size; unsigned long used; } sSlot[SLOTS];
+static struct { char rel[128]; FILE *fp; long size; unsigned long used; int patch; } sSlot[SLOTS];
 static unsigned long sClock;
 static volatile int sLock;
 
@@ -57,13 +57,23 @@ static int slot_of(const char *rel) {
     int i, old = 0;
     FILE *fp;
 
+    extern int Port_Slus21978Files(void); /* plat_slus21978.c: the files of the patch SLUS-21978 replace the original's */
+    int patch = Port_Slus21978Files();
+
     for (i = 0; i < SLOTS; i++) {
-        if (sSlot[i].fp != NULL && strcmp(sSlot[i].rel, rel) == 0) {
+        if (sSlot[i].fp != NULL && strcmp(sSlot[i].rel, rel) == 0 && sSlot[i].patch == patch) {
             sSlot[i].used = ++sClock;
             return i;
         }
     }
-    fp = Port_FileOpenHost(rel, path, sizeof(path));
+    fp = NULL;
+    if (patch) { /* a file the patch has in its own version (its voices in Spanish: plat_slus21978.c) */
+        snprintf(path, sizeof(path), "%s/slus21978/%s", Port_FileRoot(), rel);
+        fp = fopen(path, "rb");
+    }
+    if (fp == NULL) {
+        fp = Port_FileOpenHost(rel, path, sizeof(path));
+    }
     if (fp == NULL) {
         fprintf(stderr, "bt3: file not found: %s\n", path);
         return -1;
@@ -82,6 +92,7 @@ static int slot_of(const char *rel) {
     }
     snprintf(sSlot[old].rel, sizeof(sSlot[old].rel), "%s", rel);
     sSlot[old].fp = fp;
+    sSlot[old].patch = patch;
     fseek(fp, 0, SEEK_END);
     sSlot[old].size = ftell(fp);
     {

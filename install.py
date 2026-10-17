@@ -4,6 +4,8 @@
     python3 install.py                       asks for the disc image
     python3 install.py --iso <disc.iso>      no questions
     python3 install.py --check               only checks what is installed
+    python3 install.py --slus21978 <patch.iso>     also takes the Latin-American Spanish voices of the fan patch
+                                             SLUS-21978 (found by itself next to this file or one folder up)
 
 The repository contains no game data. Everything the game needs (models, sounds, text, and the data tables of the
 executable itself) is taken from your disc image of the USA release (SLUS-21678) and stays on your machine.
@@ -203,7 +205,7 @@ def find_iso(args):
         if not p.is_file():
             raise Failed(f"No such file: {p}")
         return p
-    here = sorted(ROOT.glob("*.iso")) + sorted(ROOT.parent.glob("*.iso"))
+    here = [p for p in sorted(ROOT.glob("*.iso")) + sorted(ROOT.parent.glob("*.iso")) if not is_slus21978(p)]
     if len(here) == 1:
         return here[0]
     if not sys.stdin.isatty():
@@ -264,6 +266,45 @@ def step_disc(args):
                "    The port is built from the unmodified USA release (SLUS-21678); a patched or damaged image will not work.")
     s.ok("the USA release, checksums match")
     return iso
+
+
+# ------------------------------------------------------------- the fan patch SLUS-21978 (optional, its voices)
+
+def is_slus21978(p):
+    """An image of the fan patch SLUS-21978 (its program SLUS_219.78 and its BIN/DBZ4.BIN are on it)."""
+    sys.path.insert(0, str(ROOT / "port" / "tools"))
+    from extract_slus21978 import Iso
+    try:
+        iso = Iso(p)
+        return iso.find("SLUS_219.78") is not None and iso.find("BIN/DBZ4.BIN") is not None
+    except (OSError, struct.error, IndexError):
+        return False
+
+
+def find_slus21978(args):
+    """The patch's image: --slus21978, or the one image of it in this folder or the one above; None without one."""
+    if args.slus21978:
+        p = pathlib.Path(args.slus21978).expanduser()
+        if not p.is_file():
+            raise Failed(f"No such file: {p}")
+        if not is_slus21978(p):
+            raise Failed(f"{p.name} is not the fan patch SLUS-21978 (no SLUS_219.78 / BIN/DBZ4.BIN on it).")
+        return p
+    here = [p for p in sorted(ROOT.glob("*.iso")) + sorted(ROOT.parent.glob("*.iso")) if is_slus21978(p)]
+    return here[0] if len(here) == 1 else None
+
+
+def step_slus21978(args, patch):
+    """Its Latin-American Spanish voices (the third voice language of the options) and its music, into gamedata/slus21978/."""
+    data = ROOT / "gamedata"
+    if not args.force and (data / "slus21978" / "source.txt").is_file():
+        Step("SLUS-21978: voices and music").skip("already taken")
+        return
+    s = Step("SLUS-21978: voices and music")
+    code, out = run([sys.executable, ROOT / "port/tools/extract_slus21978.py", patch, data])
+    if code != 0:
+        s.fail("Taking the voices and music from the patch's image failed (see install.log).")
+    s.ok(out.strip().splitlines()[-1] if out.strip() else "done")
 
 
 # ------------------------------------------------------------------------------------------------- 3. game data
@@ -394,6 +435,7 @@ def write_launcher(exe, bits32):
 def main():
     ap = argparse.ArgumentParser(description="Setup wizard of the Budokai Tenkaichi 3 PC port.", epilog="Run without arguments to be asked for the disc image.")
     ap.add_argument("--iso", help="your disc image of the USA release (SLUS-21678)")
+    ap.add_argument("--slus21978", help="optional: your disc image of the fan patch SLUS-21978, for its Latin-American Spanish voices")
     ap.add_argument("--32", dest="bits32", action="store_true", help="make the 32-bit build instead of the 64-bit one")
     ap.add_argument("--check", action="store_true", help="only check the requirements")
     ap.add_argument("--rebuild", action="store_true", help="build again even if the program is there")
@@ -418,8 +460,13 @@ def main():
         if args.check:
             print()
             return 0
+        patch = find_slus21978(args)
+        if patch is not None:
+            Step.total += 1
         iso = step_disc(args)
         step_gamedata(args, iso)
+        if patch is not None:
+            step_slus21978(args, patch)
         step_split(args)
         exe = step_build(args)
         step_test(args, exe)

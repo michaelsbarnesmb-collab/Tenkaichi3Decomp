@@ -60,6 +60,8 @@ int PortStages_Count(void);
 const char *PortSongs_Dir(void);                           // plat_songs.c
 const char *PortSongs_Name(int index);
 int PortSongs_Count(void);
+int PortSongs_Slus21978(int *first, int *count); // plat_songs.c: the songs of the patch SLUS-21978, when taken from its disc
+const char *PortSongs_Slus21978Dir(void);
 int Port_Setting(const char *name, int def);   // plat_settings.c
 void Port_SettingSave(const char *name, int value);
 void Port_SettingText(const char *name, const char *def, char *out, int size);
@@ -108,6 +110,11 @@ static void chat_close(void);
    from outside the disc, drawn by the port over the menu in the game's own lettering. Raw RGBA, a 12-byte header
    (w, h, count) and then `count` images of w x h stacked. */
 static SDL_GPUTexture *sNameTex, *sSongTex;
+// The name pictures of the patch SLUS-21978's songs (the patch's own, names.rgba in their folder: every name, then
+// every name lit), drawn for the songs from sSlusFirst on.
+static SDL_GPUTexture *sSlusTex;
+static uint32_t sSlusW, sSlusH, sSlusRows;
+static int sSlusFirst = -1, sSlusCount;
 static uint32_t sNameW, sNameH, sNameCount, sSongW, sSongH, sSongCount;
 
 static uint8_t *read_strip(const char *path, size_t *bytes, uint32_t *w, uint32_t *h, uint32_t *count) {
@@ -408,6 +415,13 @@ static void load_strips(void) {
     sSongTex = PortSongs_Dir()[0] != '\0' ? load_strip("BT3_SONG_NAMES", path, &sSongW, &sSongH, &sSongCount, "song-name") : NULL;
     if (sNameTex == NULL) { sNameCount = 0; }
     if (sSongTex == NULL) { sSongCount = 0; }
+    if (PortSongs_Slus21978(&sSlusFirst, &sSlusCount)) {
+        snprintf(path, sizeof(path), "%s/names.rgba", PortSongs_Slus21978Dir());
+        sSlusTex = load_strip("BT3_SLUS21978_SONG_NAMES", path, &sSlusW, &sSlusH, &sSlusRows, "SLUS-21978 song-name");
+        if (sSlusTex != NULL && sSlusRows != 2u * (uint32_t)sSlusCount) { // (not the list's: the names would be another song's)
+            sSlusTex = NULL;
+        }
+    }
     gUiNameReady = 1;
     gUiSongReady = 1;
 }
@@ -2409,7 +2423,16 @@ static bool frame_build(void) {
                          ImVec2(0.0f, (float)gUiNameIdx / (float)sNameCount),
                          ImVec2(1.0f, (float)(gUiNameIdx + 1) / (float)sNameCount));
         }
-        if (songOn && MenuText_GetFont() != 0) {
+        if (songOn && sSlusTex != NULL && gUiSongIdx >= sSlusFirst && gUiSongIdx < sSlusFirst + sSlusCount) {
+            // a song of the patch SLUS-21978: its own name picture, in place of the disc's (the same 512x32 row)
+            float x = (float)gUiPresentX + (float)gUiSongX * sx;
+            float y = (float)gUiPresentY + (float)gUiSongY * sy;
+            float w = (float)gUiSongW * sx;
+            float h = (float)gUiSongH * sy;
+            int r = gUiSongIdx - sSlusFirst + (gUiSongLit ? sSlusCount : 0);
+            dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)sSlusTex), ImVec2(x, y), ImVec2(x + w, y + h),
+                         ImVec2(0.0f, (float)r / (float)sSlusRows), ImVec2(1.0f, (float)(r + 1) / (float)sSlusRows));
+        } else if (songOn && MenuText_GetFont() != 0) {
             const FontName *fn = font_name(gUiSongLit ? NF_SONG_LIT : NF_SONG, PortSongs_Name(gUiSongIdx));
             float x = (float)gUiPresentX + (float)gUiSongX * sx, y = (float)gUiPresentY + (float)gUiSongY * sy;
             if (fn != NULL) {

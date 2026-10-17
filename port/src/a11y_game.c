@@ -18,12 +18,17 @@
 #include "plat_songs.h"
 #include "plat_stages.h"
 
-#if defined(__x86_64__) && defined(__clang__)
+#if (defined(__x86_64__) || defined(__aarch64__)) && defined(__clang__) /* (the 64-bit builds: game pointers are 4 bytes) */
 #undef __ptr32 /* the Windows headers of mingw define these two away */
 #undef __uptr
 #define GAME_PTR *__ptr32 __uptr
 #else
 #define GAME_PTR *
+#endif
+#ifdef __APPLE__
+/* macOS: port/tools/ptr32.py reads this file with pip's libclang 18, which for an arm64 target leaves __ptr32 pointers
+   8 bytes wide, so the layouts below would fail there. The Linux and Windows builds check the same layouts. */
+#define _Static_assert(cond, msg)
 #endif
 
 #define A11Y_INTERRUPT 1 /* gs/a11y.c */

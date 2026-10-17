@@ -120,6 +120,21 @@ python3 install.py --iso <your disc image>   # then ./play.sh
 `python3 install.py --check` lists what is missing. How the build works and what is left:
 [docs/port/macos_plan.md](docs/port/macos_plan.md).
 
+### Latin-American Spanish voices (optional, from source)
+
+If you also have your own disc image of the fan patch **SLUS-21978** (Beta 14 Rev 2), the game can play its
+Latin-American Spanish voices: fighters' lines, shouts and hits, the announcer and the menus' guide. Put that `.iso`
+next to `install.py` (beside the SLUS-21678 one) or one folder up, or give it with `--slus21978`:
+
+```
+python3 install.py --slus21978 <SLUS-21978 image>   # or, with the data already installed:
+python3 port/tools/extract_slus21978.py <SLUS-21978 image>
+```
+
+The voices go to `gamedata/slus21978/` (about 480 MB). The options' voice menu then has a third choice, Latin-American
+Spanish, beside English and Japanese. Without that image nothing changes. Online the shouts and hits stay the
+original's (the game's memory must be the same on both sides); the spoken lines are each player's own choice.
+
 The release archives for Linux and Windows are built from the repository alone, with no disc involved:
 `port/release/build.sh` (needs only docker) or the GitHub workflow in `.github/workflows/release.yml`. The
 repository carries the shape of the game's built-in data tables without their values (`port/data`); the
