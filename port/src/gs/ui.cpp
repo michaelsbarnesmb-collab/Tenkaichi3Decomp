@@ -60,6 +60,8 @@ int PortStages_Count(void);
 const char *PortSongs_Dir(void);                           // plat_songs.c
 const char *PortSongs_Name(int index);
 int PortSongs_Count(void);
+int PortSongs_Slus21978(int *first, int *count); // plat_songs.c: the songs of the patch SLUS-21978, when taken from its disc
+const char *PortSongs_Slus21978Dir(void);
 int Port_Setting(const char *name, int def);   // plat_settings.c
 void Port_SettingSave(const char *name, int value);
 void Port_SettingText(const char *name, const char *def, char *out, int size);
@@ -108,6 +110,11 @@ static void chat_close(void);
    from outside the disc, drawn by the port over the menu in the game's own lettering. Raw RGBA, a 12-byte header
    (w, h, count) and then `count` images of w x h stacked. */
 static SDL_GPUTexture *sNameTex, *sSongTex;
+// The name pictures of the patch SLUS-21978's songs (the patch's own, names.rgba in their folder: every name, then
+// every name lit), drawn for the songs from sSlusFirst on.
+static SDL_GPUTexture *sSlusTex;
+static uint32_t sSlusW, sSlusH, sSlusRows;
+static int sSlusFirst = -1, sSlusCount;
 static uint32_t sNameW, sNameH, sNameCount, sSongW, sSongH, sSongCount;
 
 static uint8_t *read_strip(const char *path, size_t *bytes, uint32_t *w, uint32_t *h, uint32_t *count) {
@@ -408,6 +415,13 @@ static void load_strips(void) {
     sSongTex = PortSongs_Dir()[0] != '\0' ? load_strip("BT3_SONG_NAMES", path, &sSongW, &sSongH, &sSongCount, "song-name") : NULL;
     if (sNameTex == NULL) { sNameCount = 0; }
     if (sSongTex == NULL) { sSongCount = 0; }
+    if (PortSongs_Slus21978(&sSlusFirst, &sSlusCount)) {
+        snprintf(path, sizeof(path), "%s/names.rgba", PortSongs_Slus21978Dir());
+        sSlusTex = load_strip("BT3_SLUS21978_SONG_NAMES", path, &sSlusW, &sSlusH, &sSlusRows, "SLUS-21978 song-name");
+        if (sSlusTex != NULL && sSlusRows != 2u * (uint32_t)sSlusCount) { // (not the list's: the names would be another song's)
+            sSlusTex = NULL;
+        }
+    }
     gUiNameReady = 1;
     gUiSongReady = 1;
 }
@@ -1511,6 +1525,80 @@ extern "C" {
 extern volatile int gPortUnlockAll, gPortUnlockDone;
 }
 
+extern "C" {
+#include "../../include/plat_charas.h"
+int Port_NetSession(void);
+}
+
+// Character packages (the `characters` folder next to the game; docs/port/character_packages.md): what is
+// installed, what each folder does, and what was found wrong with it.
+static void mods_tab(void) {
+    int count = Port_CharaPkgCount(), added = 0, replaced = 0, off = 0;
+    for (int i = 0; i < count; i++) {
+        const PortCharaPkg *p = Port_CharaPkg(i);
+        added += p->kind == PORT_PKG_ADDS;
+        replaced += p->kind == PORT_PKG_REPLACES;
+        off += p->kind == PORT_PKG_OFF;
+    }
+    if (Port_NetSession()) {
+        ImGui::TextWrapped("Character packages are not part of online play: an online match has the game's own characters only, "
+                           "and nothing of the \"characters\" folder is loaded.");
+        ImGui::Spacing();
+    } else if (count == 0) {
+        ImGui::TextWrapped("No character packages. A package is a folder in \"characters\" next to the game: it adds a character, "
+                           "or replaces one of the game's.");
+        return;
+    }
+    ImGui::Text("Character packages: %d added, %d replacing", added, replaced);
+    if (off > 0) {
+        ImGui::SameLine();
+        ImGui::Text("(%d not used)", off);
+    }
+    ImGui::Spacing();
+    if (!Port_NetSession()) {
+        bool pool = Port_CharaPool() != 0;
+        if (ImGui::Checkbox("Added characters in random picks", &pool)) {
+            Port_CharaPoolSet(pool);
+        }
+        ImGui::SetItemTooltip("Off: the \"random\" cell of the character select and the computer's entrants of a tournament are\n"
+                              "drawn from the game's own characters, as in the original. On: the added characters are in the draw too.\n"
+                              "The computer then plays them with the behaviour of the character each is based on.");
+        ImGui::Spacing();
+    }
+    {
+        for (int i = 0; i < count; i++) {
+            ImGui::Separator();
+            const PortCharaPkg *p = Port_CharaPkg(i);
+            ImGui::PushID(i);
+            ImGui::TextUnformatted(p->name[0] != '\0' ? p->name : p->folder);
+            ImGui::SameLine();
+            if (p->kind == PORT_PKG_ADDS) {
+                ImGui::TextDisabled("adds a character (id %d)", p->id);
+            } else if (p->kind == PORT_PKG_REPLACES) {
+                ImGui::TextDisabled("replaces character %d", p->id);
+            } else {
+                ImGui::TextDisabled("not used");
+            }
+            if (p->author[0] != '\0' || p->version[0] != '\0') {
+                ImGui::SameLine();
+                ImGui::TextDisabled("- %s%s%s", p->author, p->author[0] != '\0' && p->version[0] != '\0' ? ", " : "", p->version);
+            }
+            ImGui::Indent();
+            ImGui::TextDisabled("folder: %s", p->folder);
+            if (p->about[0] != '\0') {
+                ImGui::TextWrapped("%s", p->about);
+            }
+            if (p->problem[0] != '\0') {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.35f, 1.0f));
+                ImGui::TextWrapped("%s", p->problem);
+                ImGui::PopStyleColor();
+            }
+            ImGui::Unindent();
+            ImGui::PopID();
+        }
+    }
+}
+
 extern "C" int Port_GameSpeed(void);          // plat_stub.c: the player's own game speed, percent; never used online
 extern "C" void Port_GameSpeedSet(int percent);
 extern "C" void Port_AudioRefresh(void);
@@ -1795,7 +1883,7 @@ static void build(void) {
         open = false;
     }
     if (sForceTab < 0 && (pad_pressed(ImGuiKey_GamepadL1) || pad_pressed(ImGuiKey_GamepadR1))) {
-        sForceTab = (sTab + (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? 6 : 1)) % 7;
+        sForceTab = (sTab + (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? 7 : 1)) % 8;
         sPadTab = true;
     }
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -1856,6 +1944,7 @@ static void build(void) {
             }
             if (tab("Cheats", 5)) { cheats_tab(); ImGui::EndTabItem(); }
             if (tab("Misc", 6)) { misc_tab(); ImGui::EndTabItem(); }
+            if (tab("Mods", 7)) { mods_tab(); ImGui::EndTabItem(); }
             ImGui::EndTabBar();
         }
         ImGui::EndChild();
@@ -2409,7 +2498,16 @@ static bool frame_build(void) {
                          ImVec2(0.0f, (float)gUiNameIdx / (float)sNameCount),
                          ImVec2(1.0f, (float)(gUiNameIdx + 1) / (float)sNameCount));
         }
-        if (songOn && MenuText_GetFont() != 0) {
+        if (songOn && sSlusTex != NULL && gUiSongIdx >= sSlusFirst && gUiSongIdx < sSlusFirst + sSlusCount) {
+            // a song of the patch SLUS-21978: its own name picture, in place of the disc's (the same 512x32 row)
+            float x = (float)gUiPresentX + (float)gUiSongX * sx;
+            float y = (float)gUiPresentY + (float)gUiSongY * sy;
+            float w = (float)gUiSongW * sx;
+            float h = (float)gUiSongH * sy;
+            int r = gUiSongIdx - sSlusFirst + (gUiSongLit ? sSlusCount : 0);
+            dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)sSlusTex), ImVec2(x, y), ImVec2(x + w, y + h),
+                         ImVec2(0.0f, (float)r / (float)sSlusRows), ImVec2(1.0f, (float)(r + 1) / (float)sSlusRows));
+        } else if (songOn && MenuText_GetFont() != 0) {
             const FontName *fn = font_name(gUiSongLit ? NF_SONG_LIT : NF_SONG, PortSongs_Name(gUiSongIdx));
             float x = (float)gUiPresentX + (float)gUiSongX * sx, y = (float)gUiPresentY + (float)gUiSongY * sy;
             if (fn != NULL) {

@@ -114,6 +114,10 @@ extern void Port_NetRules(int *type, int *dp, int *time); /* gs/net.c */
 int __wrap_Progress_Main(int arg) {
     const char *path;
     PortStages_Init();
+    {
+        extern void PortCharas_Init(void); /* plat_charas.c: the characters folder */
+        PortCharas_Init();
+    }
     PortSongs_Init();
     {
         extern void Port_VerifyStart(void); /* plat_verify.c: is the data the original disc's (in the background) */
@@ -209,6 +213,11 @@ int __wrap_Progress_Main(int arg) {
             BattleSide_GetMember(0, 0)->chara = atoi(getenv("BT3_CHARA"));
             BattleSide_GetMember(0, 0)->costume = getenv("BT3_COSTUME") != NULL ? atoi(getenv("BT3_COSTUME")) : 0;
             BattleSide_GetMember(0, 0)->variant = getenv("BT3_VARIANT") != NULL;
+            {
+                /* the setup's end copies it (the battle runs from that copy): again, with the new fighter */
+                extern void BattleSetup_Finish(void);
+                BattleSetup_Finish();
+            }
             printf("bt3: side 0 is character %d, costume %d\n", BattleSide_GetMember(0, 0)->chara, BattleSide_GetMember(0, 0)->costume);
         }
     }

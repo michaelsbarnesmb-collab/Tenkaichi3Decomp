@@ -539,7 +539,7 @@ void Num_DrawEx(Flash *flash, NumStyle *style, char *a, char *b, s32 value) {
 s32 ChrGrid_IsSelectable(ChrGridCell *cells, s32 index) {
     s32 ok = 1;
 
-    if (cells[index].id >= CHRGRID_ID_LOCKED) {
+    if (CHRGRID_IS_MARKER_FROM(cells[index].id, CHRGRID_ID_LOCKED)) {
         ok = cells[index].id == CHRGRID_ID_CUSTOM;
     }
     return ok;
@@ -561,7 +561,7 @@ s32 ChrGrid_MoveRight(ChrGridCell *cells, s32 *col, s32 row) {
             break;
         }
         id = cells[row * CHRGRID_COLS + *col].id;
-        if (id < CHRGRID_ID_LOCKED) {
+        if (!CHRGRID_IS_MARKER_FROM(id, CHRGRID_ID_LOCKED)) {
             break;
         }
         if (id == CHRGRID_ID_CUSTOM) {
@@ -588,7 +588,7 @@ s32 ChrGrid_MoveLeft(ChrGridCell *cells, s32 *col, s32 row) {
             break;
         }
         id = cells[row * CHRGRID_COLS + *col].id;
-        if (id < CHRGRID_ID_LOCKED) {
+        if (!CHRGRID_IS_MARKER_FROM(id, CHRGRID_ID_LOCKED)) {
             break;
         }
         if (id == CHRGRID_ID_CUSTOM) {
@@ -609,7 +609,7 @@ void ChrGrid_MoveDown(ChrGridCell *cells, s32 *col, s32 *row, s32 rows) {
             *row = 0;
         }
         id = cells[*row * CHRGRID_COLS + *col].id;
-        if (id < CHRGRID_ID_LOCKED) {
+        if (!CHRGRID_IS_MARKER_FROM(id, CHRGRID_ID_LOCKED)) {
             return;
         }
         if (id == CHRGRID_ID_CUSTOM) {
@@ -628,7 +628,7 @@ void ChrGrid_MoveUp(ChrGridCell *cells, s32 *col, s32 *row, s32 rows) {
             *row = rows - 1;
         }
         id = cells[*row * CHRGRID_COLS + *col].id;
-        if (id < CHRGRID_ID_LOCKED) {
+        if (!CHRGRID_IS_MARKER_FROM(id, CHRGRID_ID_LOCKED)) {
             return;
         }
         if (id == CHRGRID_ID_CUSTOM) {
@@ -649,7 +649,7 @@ void ChrGrid_NextForm(s32 *forms, s32 *index) {
         if (start == *index) {
             break;
         }
-    } while (forms[*index] >= CHRGRID_ID_RANDOM);
+    } while (CHRGRID_IS_MARKER_FROM(forms[*index], CHRGRID_ID_RANDOM));
 }
 
 /* Steps to the previous form of a cell that is a character, wrapping in the seven slots. */
@@ -664,13 +664,13 @@ void ChrGrid_PrevForm(s32 *forms, s32 *index) {
         if (start == *index) {
             break;
         }
-    } while (forms[*index] >= CHRGRID_ID_RANDOM);
+    } while (CHRGRID_IS_MARKER_FROM(forms[*index], CHRGRID_ID_RANDOM));
 }
 
 /* Puts the cursor on a character if it is on a marker cell: right in the row first, then down.
  * Declared with a result that it never sets: the call of ChrGrid_MoveDown is not a tail call. */
 s32 ChrGrid_FixCursor(ChrGridCell *cells, s32 *col, s32 *row, s32 rows) {
-    if (cells[*row * CHRGRID_COLS + *col].id >= CHRGRID_ID_RANDOM) {
+    if (CHRGRID_IS_MARKER_FROM(cells[*row * CHRGRID_COLS + *col].id, CHRGRID_ID_RANDOM)) {
         if (ChrGrid_MoveRight(cells, col, *row) == 0) {
             ChrGrid_MoveDown(cells, col, row, rows);
         }
@@ -868,6 +868,44 @@ void ChrGrid_Build(s32 *outCount, ChrGridCell *out, s32 *inCount, ChrGridCell *i
             (*outCount)++;
         }
     }
+
+#ifdef PORT
+    /* PC build: the characters added from outside the disc (port/src/plat_charas.c), after the disc's: in the place
+       of the last row's filler cells, then in rows of their own. A character with forms has one cell with its
+       forms under it, as the disc's have; where the screen lists every form as a cell of its own
+       (CHRGRID_NO_FORMS) so are they. They are never looked up in the save. Not in an online session (both players
+       must have the same list), and not in the customising screens (modes 0x30..0x32), which write the save by
+       the cell's place. */
+    if (!Port_NetSession() && Port_CharaCount() > 0 && !(mode >= 0x30 && mode < 0x33)) {
+        s32 n = *outCount, k, first = n;
+        while (n > 0 && out[n - 1].id == CHRGRID_ID_EMPTY) {
+            n--;
+        }
+        for (k = 0; k < Port_CharaCount() && n < 165 - CHRGRID_COLS; k++) {
+            int forms[CHRGRID_FORM_MAX], count = Port_CharaForms(PORT_CHARA_FIRST + k, forms, CHRGRID_FORM_MAX), f;
+            if (count < 0 && !(flags & CHRGRID_NO_FORMS)) {
+                continue; /* a form: under its character's cell */
+            }
+            Port_CharaCellLog((int)n, PORT_CHARA_FIRST + (int)k, count < 1 ? 1 : count);
+            memset(&out[n], 0, sizeof(out[n]));
+            out[n].id = PORT_CHARA_FIRST + k;
+            if (count > 1 && !(flags & CHRGRID_NO_FORMS)) {
+                out[n].formCount = count;
+                for (f = 0; f < count; f++) {
+                    out[n].form[f] = forms[f];
+                }
+            }
+            n++;
+        }
+        if (n != first || *outCount != first) {
+            for (; n % CHRGRID_COLS != 0; n++) {
+                memset(&out[n], 0, sizeof(out[n]));
+                out[n].id = CHRGRID_ID_EMPTY;
+            }
+            *outCount = n;
+        }
+    }
+#endif
 
     if (!(flags & CHRGRID_NO_CUSTOM) && custom != NULL) {
         *customCount = 0;

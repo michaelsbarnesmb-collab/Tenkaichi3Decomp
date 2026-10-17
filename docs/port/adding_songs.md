@@ -215,7 +215,7 @@ That already works through the mods mechanism: just put the ADX at `gamedata/mod
 
 ## Limits and notes
 
-- **40 added songs** at most (see the end of this file; it was 6).
+- **192 added songs** at most (see the end of this file; it was 6, then 40).
 - The audio is converted to **ADX** (ffmpeg `adpcm_adx`). The game plays it with its ADX decoder; other
   formats make no sound.
 - The music list is a **reel**: the added ones appear before Random.
@@ -252,3 +252,18 @@ those two lines were answered with the songs (releases 0.1.8 to 0.1.11).
 - Checked with 45 files in the folder: 40 are taken (the rest named in the log), the music select's list has 61
   entries with "random" last, and a fight set to entries 0x1A, 0x1E, 0x1F and 0x41 opens the 1st, 5th, 6th and 40th
   file; a disc entry opens none of them. Not checked: the forty names on screen, and scrolling the list by hand.
+
+## The music of the patch SLUS-21978, and room for 192 songs (2026-10-13)
+
+When the player has taken the extras of the fan patch SLUS-21978 from their own disc image
+(`port/tools/extract_slus21978.py`, or `install.py --slus21978`), its 125 tracks are in `<data>/slus21978/songs` with a `songs.txt`
+in the order of that disc, and they are added after the player's own songs (`add_slus21978` in `port/src/plat_songs.c`).
+Their names are the patch's own pictures: entry n of its music list plays file 0x816 + n (it has 0x816 where the
+original has 0x10B16) and its name is row n % 8 of sheet n / 8 in its character select's resources (menu archive
+0x1C1, section 2, part 4; part 3 lit). extract_slus21978.py decodes those sheets through GS memory as the game does
+(512x256, 8 or 4 bits with a table of 32-bit colours) and writes `names.rgba` beside the songs (every name, then every
+name lit); ui.cpp draws a song's row over the music select. The order is the patch's list, then the tracks it does not
+list; its "random" and "locked" entries and a track with no picture are left out (125 songs). The limit of added songs is 192 now (`PORT_SONG_MAX`); the two music lists
+(`sBgmIds` in menu_c_e.c and menu_e_b.c) are sized from it. Checked: the 125 are added and their 250 pictures loaded (log lines); the pictures decoded right
+(looked at); the port's ADX reader takes their longer header (data at 0x800). NOT seen yet: a name over the music
+select, one played in a fight.

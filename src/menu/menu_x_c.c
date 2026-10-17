@@ -3,6 +3,15 @@
 #include "menu/menu_y.h"
 #include "sys/pad.h"
 #include "sys/save.h"
+#ifdef PORT
+/* port/src/plat_slus21978.c: the voices of the patch SLUS-21978 in Spanish (Latin America), when the player took them */
+extern int Port_Slus21978Voices(void);
+extern int Port_VoiceLatino(void);
+extern void Port_SetVoiceLatino(int on);
+#define OPT_LATINO_DX 0x52 /* the caption's centre in its plate */
+#define OPT_LATINO_DY 0x04
+#define OPT_LINE_VOICE 18 /* the help line of the voice language ("You can change the dialogue to English or Japanese.") */
+#endif
 
 Option *gOption = NULL; /* 0x3BC364 */
 
@@ -590,7 +599,15 @@ s32 Option_Input(void) {
                 OPT_PLATE(OPT_CLIP_PICK, "fl_off_start");
                 gOption->value = 1;
                 OPT_PLATE(OPT_CLIP_PICK, "fl_off_start");
+#ifdef PORT
+                if (Port_Slus21978Voices()) { /* the third choice: Spanish (Latin America) */
+                    gOption->value = 2;
+                    OPT_PLATE(OPT_CLIP_PICK, "fl_off_start");
+                }
+                gOption->value = Port_VoiceLatino() && (gSaveData->flags & SAVE_FLAG_VOICE) ? 2 : (gSaveData->flags ^ 1) & 1;
+#else
                 gOption->value = (gSaveData->flags ^ 1) & 1;
+#endif
                 OPT_PLATE(OPT_CLIP_PICK, "fl_on_start");
                 gOption->state = gOption->cursor;
                 gOption->picker = 6;
@@ -1123,7 +1140,15 @@ s32 Option_Input(void) {
     case OPT_ITEM_VOICE:
         if ((gPad[0].gamePressed & PADG_LEFT) || (gPad[0].gamePressed & PADG_RIGHT)) {
             OPT_PLATE(OPT_CLIP_PICK, "fl_off_start");
+#ifdef PORT
+            if (gOption->state == OPT_ITEM_VOICE && Port_Slus21978Voices()) { /* three languages */
+                gOption->value = (gOption->value + ((gPad[0].gamePressed & PADG_RIGHT) ? 1 : 2)) % 3;
+            } else {
+                gOption->value ^= 1;
+            }
+#else
             gOption->value ^= 1;
+#endif
             OPT_PLATE(OPT_CLIP_PICK, "fl_on_start");
             Snd_PlaySe(1, 0);
         } else if (gPad[0].gamePressed & PADG_CROSS) {
@@ -1160,11 +1185,21 @@ s32 Option_Input(void) {
                 gOption->state = OPT_ITEM_SOUND;
                 Flash_GotoLabel(&gOption->flash[0], "fl_value_out", 1);
                 OPT_PLATE(OPT_CLIP_ROW_SOUND, "fl_on_start");
+#ifdef PORT
+                /* Spanish: the save says English (the game computes with its lines), the port plays the Spanish files */
+                Port_SetVoiceLatino(gOption->value == 2);
+                if (gOption->value == 1) {
+                    gSaveData->flags &= ~SAVE_FLAG_VOICE;
+                } else {
+                    gSaveData->flags |= SAVE_FLAG_VOICE;
+                }
+#else
                 if (gOption->value != 0) {
                     gSaveData->flags &= ~SAVE_FLAG_VOICE;
                 } else {
                     gSaveData->flags |= SAVE_FLAG_VOICE;
                 }
+#endif
             }
         } else if (gPad[0].gamePressed & PADG_TRIANGLE) {
             Snd_PlaySe(1, 2);
@@ -1301,6 +1336,38 @@ s32 Option_Input(void) {
                         Flash_FindLabel(flash, NULL, name, &ref); \
                         Flash_ClipSetUv(flash, &ref, &uv); \
                     }
+
+#ifdef PORT
+#include "battle/col_c.h" /* FontStyle, FONT_ALIGN_*, FONT_SHADOW_* */
+/* The caption of the third voice language, Spanish (Latin America): printed in the game's font over its plate
+   (a placeholder for a caption image in the style of the other two). Lit like the chosen plate's caption. */
+static void Option_DrawLatino(MFlash *flash, MFlashRef *plate) {
+    extern FontStyle gFontStyle;
+    extern void Font_PrintAt(s32 x, s32 y, u16 *str);
+    extern void Flash_ClipGetPos(MFlash *flash, MFlashRef *ref, s32 *x, s32 *y);
+    static u16 text[] = { 'E', 'S', 'P', 'A', 0xD1, 'O', 'L', ' ', 'L', 'A', 'T', 'I', 'N', 'O', 0 };
+    FontStyle saved = gFontStyle;
+    s32 x = 0, y = 0;
+
+    if (plate->id < 0) {
+        return;
+    }
+    Flash_ClipGetPos(flash, plate, &x, &y);
+    /* the look of the movie's own "English" / "Japanese": lavender outlined in purple, orange outlined in brown
+       when chosen (colours 0xAABBGGRR) */
+    gFontStyle.scale = 1.0f;
+    gFontStyle.scaleX = 0.88f;
+    gFontStyle.scaleY = 1.3f;
+    gFontStyle.color = gOption->value == 2 ? 0x8050A8F8 : 0x80FCE4F2;
+    gFontStyle.shadowMode = FONT_SHADOW_OUTLINE8;
+    gFontStyle.shadowColor = gOption->value == 2 ? 0x80081840 : 0x80801070;
+    gFontStyle.shadowDx = 1;
+    gFontStyle.shadowDy = 1;
+    gFontStyle.align = FONT_ALIGN_CENTER;
+    Font_PrintAt(x + OPT_LATINO_DX, y + OPT_LATINO_DY, text);
+    gFontStyle = saved;
+}
+#endif
 
 /* Per frame: sets up every clip of the movie from the screen's state and draws the screen. */
 void Option_Draw(void) {
@@ -1786,6 +1853,21 @@ void Option_Draw(void) {
         uv.x1 = 0x100;
         uv.x0 = 0;
         sprintf(name, "mc_select_plate_%d", i + 3);
+#ifdef PORT
+        if (gOption->picker == 6 && i == 0 && Port_Slus21978Voices()) {
+            /* the voice language's third plate: Spanish (Latin America). Its caption is printed (Option_DrawLatino);
+               the plate's own text clips would show the controller page's captions. */
+            Flash_FindLabel(flash, NULL, name, &ref);
+            Flash_ClipSetFlags(flash, &ref, 2, 1);
+            Flash_FindLabel(flash, name, "mc_select_text_off", &ref);
+            Flash_ClipSetFlags(flash, &ref, 2, 0);
+            Flash_FindLabel(flash, name, "mc_select_text_on", &ref);
+            Flash_ClipSetFlags(flash, &ref, 2, 0);
+            Flash_FindLabel(flash, NULL, name, &ref);
+            Option_DrawLatino(flash, &ref);
+            continue;
+        }
+#endif
         if (gOption->picker != 3 && gOption->picker != 4 && gOption->picker != 0 && gOption->picker != 6 &&
             gOption->picker < 7) {
             Flash_FindLabel(flash, name, "mc_select_text_off", &ref);
@@ -1949,7 +2031,22 @@ void Option_Draw(void) {
         Flash_Draw(&gOption->flash[i]);
     }
     IconWin_Draw();
+#ifdef PORT
+    if (gOption->voiceLine == OPT_LINE_VOICE && Port_Slus21978Voices()) { /* its help names the third language */
+        extern void MsgWin_DrawString(u16 *str);
+        static u16 help[0x60];
+        const char *text = "You can change the dialogue to English,\nJapanese or Latin-American Spanish.";
+        for (i = 0; text[i] != 0; i++) {
+            help[i] = (u8)text[i];
+        }
+        help[i] = 0;
+        MsgWin_DrawString(help);
+    } else {
+        MsgWin_Draw(0, 0, gOption->voiceLine);
+    }
+#else
     MsgWin_Draw(0, 0, gOption->voiceLine);
+#endif
     ColorFade_Draw();
     if (gOption->mcBusy) {
         gOption->mcBusy = McFlow_Update();
@@ -2119,6 +2216,9 @@ void Option_UpdateReset(void) {
                 gSaveData->bgmVolume = 9;
                 gSaveData->seVolume = 9;
                 gSaveData->flags |= SAVE_FLAG_VOICE;
+#ifdef PORT
+                Port_SetVoiceLatino(0);
+#endif
                 SndOpt_Apply();
             } else if (gOption->state == YOPT_CTRL_RESET) {
                 if (gSaveData->flags & 8) {

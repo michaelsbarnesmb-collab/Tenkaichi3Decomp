@@ -8,6 +8,8 @@
 /* The added stages' models: files 70000.. of the second archive, past its end (65,201 files); the same number
    as PORT_ADDED_STAGE_FILE in src/battle/battle_load.c. */
 #define PORT_STAGE_FILE_INDEX 70000
+#define PORT_STAGE_THUMB_INDEX 70100 /* the select's picture of an added stage (include/menu/menu_d.h) */
+#define PORT_STAGE_THUMB_MAX 0x3B800  /* the select's buffer for it */
 
 char gPortStageNames[PORT_STAGE_MAX][64];
 int gPortExtraStageCount;
@@ -15,7 +17,7 @@ int gPortExtraStages[PORT_STAGE_MAX];
 
 typedef struct StageAlias {
     char rel[48];   /* the path the game asks for, under the data root */
-    char target[192]; /* where it is served from */
+    char target[448]; /* where it is served from */
 } StageAlias;
 
 static StageAlias sAliases[PORT_STAGE_MAX * 2];
@@ -60,6 +62,57 @@ static char *trim(char *s) {
         *--e = '\0';
     }
     return s;
+}
+
+enum { STAGE_ICON_SIZE = 5504 };
+static unsigned char sIcon[PORT_STAGE_MAX][STAGE_ICON_SIZE + 1];
+static unsigned char sIconHave[PORT_STAGE_MAX];
+static unsigned char *sIconMem; /* the icons in the game's memory, while the select is up */
+static void *sIconRes[PORT_STAGE_MAX];
+extern void *Heap_Alloc(int size, int align, int fromTail, int heap); /* the game's (src/sys/heap.c) */
+extern void Heap_Free(void *ptr);
+extern void Res_RelocateOffsets(void *out, void *base, void *hdr); /* src/sys/gfxm_b_b.c */
+
+/* The added stages' own icons, made ready as the select makes the disc's (in the game's memory: its 32-bit
+   pointers must reach them). The select calls Load when it has set up the disc's and Free when it ends. */
+void PortStageIcons_Free(void) {
+    extern int Port_NetSession(void); /* gs/net.c */
+    if (Port_NetSession()) { /* (online: no added stage, and none of the game's memory taken; as PortChips_Free) */
+        return;
+    }
+    if (sIconMem != NULL) {
+        Heap_Free(sIconMem);
+        sIconMem = NULL;
+    }
+    memset(sIconRes, 0, sizeof(sIconRes));
+}
+
+void PortStageIcons_Load(void) {
+    int i;
+    extern int Port_NetSession(void); /* gs/net.c */
+    if (Port_NetSession()) {
+        return;
+    }
+    PortStageIcons_Free();
+    if (gPortExtraStageCount == 0) {
+        return;
+    }
+    sIconMem = Heap_Alloc(gPortExtraStageCount * STAGE_ICON_SIZE, 0x40, 0, 2);
+    for (i = 0; sIconMem != NULL && i < gPortExtraStageCount; i++) {
+        if (sIconHave[i]) {
+            void *res = sIconMem + i * STAGE_ICON_SIZE;
+            memcpy(res, sIcon[i], STAGE_ICON_SIZE);
+            sIconRes[i] = res;
+            Res_RelocateOffsets(&res, res, res);
+        }
+    }
+}
+
+/* The icon of stage `id` (0x24 on), or NULL where its file has none. */
+void *PortStageIcons_Get(int id) {
+    extern int Port_NetSession(void); /* gs/net.c */
+    int i = id - PORT_STAGE_FIRST;
+    return i >= 0 && i < gPortExtraStageCount && !Port_NetSession() ? sIconRes[i] : NULL;
 }
 
 /* Adds one added stage: its next id, its display name, and the file aliases it needs. */
@@ -109,6 +162,45 @@ static void add_stage(const char *file, const char *name) {
     snprintf(sAliases[sAliasCount].rel, sizeof(sAliases[sAliasCount].rel), "pzs3us2/%05d.bin", PORT_STAGE_FILE_INDEX + i);
     snprintf(sAliases[sAliasCount].target, sizeof(sAliases[sAliasCount].target), "%s/%s", sDir, file);
     sAliasCount++;
+    {
+        /* Its picture in the stage select: `<name>.thumb` beside the model (the disc's own format: a stage's file
+           0x39D + stage copied out), or the disc thumbnail an added stage has always borrowed. */
+        char own[512], *dot;
+        FILE *fp;
+        long size = 0;
+        snprintf(own, sizeof(own), "%s/%s", sDir, file);
+        dot = strrchr(own, '.');
+        if (dot != NULL && strlen(own) + 8 < sizeof(own)) {
+            strcpy(dot, ".thumb");
+            fp = fopen(own, "rb");
+            if (fp != NULL) {
+                fseek(fp, 0, SEEK_END);
+                size = ftell(fp);
+                fclose(fp);
+            }
+        }
+        snprintf(sAliases[sAliasCount].rel, sizeof(sAliases[sAliasCount].rel), "pzs3us2/%05d.bin", PORT_STAGE_THUMB_INDEX + i);
+        if (size > 0 && size <= PORT_STAGE_THUMB_MAX) {
+            snprintf(sAliases[sAliasCount].target, sizeof(sAliases[sAliasCount].target), "%s", own);
+        } else {
+            if (size > PORT_STAGE_THUMB_MAX) {
+                fprintf(stderr, "bt3: stages: the picture of %s is larger than the select takes; a disc one is shown\n", file);
+            }
+            snprintf(sAliases[sAliasCount].target, sizeof(sAliases[sAliasCount].target), "pzs3us1/%05d.bin", 0x39D - 1 + i);
+        }
+        sAliasCount++;
+        /* Its small picture in the select's reel: `<name>.icon`, one entry of the select's stage icons (section 46 of
+           its pack, 5504 bytes) as a disc has it; kept here until the select asks (PortStageIcons_Load). */
+        sIconHave[i] = 0;
+        if (dot != NULL) {
+            strcpy(dot, ".icon");
+            fp = fopen(own, "rb");
+            if (fp != NULL) {
+                sIconHave[i] = fread(sIcon[i], 1, STAGE_ICON_SIZE + 1, fp) == STAGE_ICON_SIZE;
+                fclose(fp);
+            }
+        }
+    }
 
     gPortExtraStageCount++;
 }
@@ -229,7 +321,8 @@ int Port_StageBufSize(void) {
    would overrun the buffer and corrupt the game's heap, which showed as a crash seconds later). */
 int Port_StageFits(const char *rel, long size) {
     int index = -1;
-    if (strncmp(rel, "pzs3us2/", 8) == 0 && sscanf(rel + 8, "%d", &index) == 1 && index >= PORT_STAGE_FILE_INDEX) {
+    if (strncmp(rel, "pzs3us2/", 8) == 0 && sscanf(rel + 8, "%d", &index) == 1 && index >= PORT_STAGE_FILE_INDEX &&
+        index < PORT_STAGE_FILE_INDEX + PORT_STAGE_MAX) {
         return size <= Port_StageBufSize(); /* an added stage */
     }
     if (strncmp(rel, "pzs3us1/", 8) != 0 || sscanf(rel + 8, "%d", &index) != 1) {
