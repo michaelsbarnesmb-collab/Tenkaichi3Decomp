@@ -152,7 +152,7 @@ void PortSongs_Init(void) {
 }
 
 /* The songs whose conversion from MP3 has finished since the list was last made join it (song_mp3.c). Called by
-   the game when it sets up a select screen's music list (src/menu/menu_c_e.c, menu_e_b.c), on the game's thread:
+   the game when it sets up a select screen's music list (src/menu/char_select.c, menu_e_b.c), on the game's thread:
    the list does not change at any other time, and not in an online session, where added songs are not offered and
    nothing the two copies might not share is to change. */
 void PortSongs_Refresh(void) {
