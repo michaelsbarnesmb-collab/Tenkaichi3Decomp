@@ -2,6 +2,7 @@
 #include "menu/menu_a.h"
 #ifdef PORT
 extern void Port_NetMenuOpen(void);
+extern int Port_WiiArtAvailable(void);
 extern int Port_NetMenuListed(void);
 extern int Port_NetSession(void);
 extern void Port_NetLeave(void);
@@ -539,7 +540,14 @@ void MainMenu_Input(s32 *result) {
             break;
         case 4:
 #ifdef PORT
-            Port_NetMenuOpen(); /* the port's own screen for online play (port/src/gs/ui.cpp); the menu stays where it is */
+            if (Port_WiiArtAvailable()) {
+                gPortTboStartWii = 1;
+                gPortScreen = PORT_SCREEN_TBO;
+                MAINMENU_COUNT();
+                MAINMENU_CHOOSE(MPROG_MODE_PORT_SCREEN);
+            } else {
+                Port_NetMenuOpen(); /* original port behavior: keep the main menu behind the external online window */
+            }
 #endif
             break;
         case 5:
