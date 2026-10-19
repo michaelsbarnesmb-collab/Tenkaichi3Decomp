@@ -40,10 +40,12 @@ void GsDraw_FullscreenToggle(void); /* F11: switch, save it, write the settings 
 #define PORT_PAD_BUTTONS 16
 #define PORT_PAD_LT 100 /* controller sources besides SDL_GamepadButton values: the triggers */
 #define PORT_PAD_RT 101
-const char *PortInput_ActionLabel(int action);
+const char *PortInput_ActionLabel(int player, int action);
 int *PortInput_Keys(int player);       /* [PORT_ACTIONS] SDL scancodes, 0 = none */
 int *PortInput_PadButtons(int player); /* [PORT_PAD_BUTTONS] controller source, -1 = none */
 int *PortInput_PadSlot(int player);    /* which connected controller: -1 none, 0 = first, ... */
+int *PortInput_ControlMode(int player); /* 0 PS2, 1 Wii */
+int PortInput_UiButton(SDL_Gamepad *gamepad, int button); /* menu navigation; bindings stay physical */
 int *PortInput_OverlayKey(void);       /* the key that opens and closes the settings window (scancode, 0 = none) */
 int *PortInput_OverlayPad(void);       /* the controller button that does (-1 = none; START + SELECT always do) */
 int PortInput_Hotkey(const SDL_Event *ev); /* 1 = the event opens or closes the settings window */

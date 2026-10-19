@@ -1121,7 +1121,7 @@ int Ui_Event(const SDL_Event *ev) {
                 PortQuit_Action(PORT_QUIT_MOVE);
             }
         } else if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
-            SDL_GamepadButton button = (SDL_GamepadButton)ev->gbutton.button;
+            SDL_GamepadButton button = (SDL_GamepadButton)PortInput_UiButton(SDL_GetGamepadFromID(ev->gbutton.which), ev->gbutton.button);
             if (button == SDL_GAMEPAD_BUTTON_SOUTH) { PortQuit_Action(PORT_QUIT_CONFIRM); }
             else if (button == SDL_GAMEPAD_BUTTON_EAST) { PortQuit_Action(PORT_QUIT_CANCEL); }
             else if (button == SDL_GAMEPAD_BUTTON_DPAD_LEFT || button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT ||
@@ -1742,6 +1742,19 @@ static void controls_tab(void) {
     ImGui::RadioButton("Player 1", &player, 0);
     ImGui::SameLine();
     ImGui::RadioButton("Player 2", &player, 1);
+    ImGui::SameLine(0.0f, 24.0f);
+    int *mode = PortInput_ControlMode(player);
+    if (ImGui::Button(*mode ? "Control mode: Wii" : "Control mode: PS2")) {
+        *mode = !*mode;
+        sCapKind = 0;
+        gPortInputCapture = 0;
+        PortInput_Save();
+    }
+    ImGui::SetItemTooltip("Wii: right stick up = tag, down = transform, left/right = teammate and camera.\n"
+                          "RB/LB = rise/descend; RT/LT = fast rise/descend; hold right stick click = charge ki.\n"
+                          "Double-tap right stick left or right = Explosive Wave. Menus: X confirms, A goes back.\n"
+                          "PS2 and Wii keyboard bindings are saved separately.");
+    bool wii = *mode != 0;
     int *slot = PortInput_PadSlot(player), *keys = PortInput_Keys(player), *pads = PortInput_PadButtons(player);
     SDL_JoystickID *ids = SDL_GetGamepads(&count);
     if (*slot < 0) {
@@ -1773,15 +1786,20 @@ static void controls_tab(void) {
     if (ImGui::CollapsingHeader("Sticks, triggers and vibration", ImGuiTreeNodeFlags_DefaultOpen)) {
         sticks_panel(player);
     }
-    ImGui::TextDisabled("Choose a binding, then press the new key or button. Esc keeps it, Delete clears it;");
-    ImGui::TextDisabled("with a controller, press nothing for five seconds to keep it.");
+    ImGui::TextDisabled(wii ? "Choose a binding, then press the new key. Esc keeps it, Delete clears it." :
+                             "Choose a binding, then press the new key or button. Esc keeps it, Delete clears it;");
+    if (!wii) {
+        ImGui::TextDisabled("with a controller, press nothing for five seconds to keep it.");
+    }
     // (never lower than a few rows: in a small window the tab scrolls as a whole instead)
-    if (ImGui::BeginTable("bindings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV,
+    if (ImGui::BeginTable(wii ? "bindings_wii" : "bindings", wii ? 2 : 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_BordersInnerV,
                           ImVec2(0.0f, ImGui::GetContentRegionAvail().y > 140.0f ? ImGui::GetContentRegionAvail().y : 140.0f))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Action");
         ImGui::TableSetupColumn("Keyboard");
-        ImGui::TableSetupColumn("Controller");
+        if (!wii) {
+            ImGui::TableSetupColumn("Controller");
+        }
         ImGui::TableHeadersRow();
         {   // what opens and closes this window (not a player's: one for the program)
             const int a = PORT_ACTIONS;
@@ -1796,10 +1814,12 @@ static void controls_tab(void) {
             if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
                 capture(1, player, a);
             }
-            ImGui::TableNextColumn();
-            snprintf(label, sizeof(label), "%s##p%d", waitPad ? "press a button..." : pad >= 0 ? pad_source_name(pad) : "START + SELECT", a);
-            if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
-                capture(2, player, a);
+            if (!wii) {
+                ImGui::TableNextColumn();
+                snprintf(label, sizeof(label), "%s##p%d", waitPad ? "press a button..." : pad >= 0 ? pad_source_name(pad) : "START + SELECT", a);
+                if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
+                    capture(2, player, a);
+                }
             }
         }
         {   // what opens the online chat (not a player's: one for the program)
@@ -1815,8 +1835,10 @@ static void controls_tab(void) {
             if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
                 capture(1, player, a);
             }
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("-");
+            if (!wii) {
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("-");
+            }
         }
         for (int a = 0; a < PORT_ACTIONS; a++) {
             bool waitKey = sCapKind == 1 && sCapPlayer == player && sCapAction == a;
@@ -1824,21 +1846,23 @@ static void controls_tab(void) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(PortInput_ActionLabel(a));
+            ImGui::TextUnformatted(PortInput_ActionLabel(player, a));
             ImGui::TableNextColumn();
             snprintf(label, sizeof(label), "%s##k%d", waitKey ? "press a key..." : keys[a] > 0 ? SDL_GetScancodeName((SDL_Scancode)keys[a]) : "-", a);
             if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
                 capture(1, player, a);
             }
-            ImGui::TableNextColumn();
-            if (a < PORT_PAD_BUTTONS) {
-                snprintf(label, sizeof(label), "%s##p%d", waitPad ? "press a button..." : pad_source_name(pads[a]), a);
-                if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
-                    capture(2, player, a);
+            if (!wii) {
+                ImGui::TableNextColumn();
+                if (a < PORT_PAD_BUTTONS) {
+                    snprintf(label, sizeof(label), "%s##p%d", waitPad ? "press a button..." : pad_source_name(pads[a]), a);
+                    if (ImGui::Button(label, ImVec2(-FLT_MIN, 0.0f))) {
+                        capture(2, player, a);
+                    }
+                } else {
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextDisabled(a < 20 ? "Left stick" : "Right stick");
                 }
-            } else {
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextDisabled(a < 20 ? "Left stick" : "Right stick");
             }
         }
         ImGui::EndTable();
