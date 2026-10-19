@@ -125,6 +125,37 @@ The release archives for Linux and Windows are built from the repository alone, 
 repository carries the shape of the game's built-in data tables without their values (`port/data`); the
 finished program fetches the values from your disc when it starts.
 
+## Playing in the browser
+
+The same game also runs in a web page: the game's code and this port's engine (memory, files, saves, sound, input,
+the OpenGL renderer, the online play of `net.c`) compiled to WebAssembly with Emscripten, with a WebGL 2 renderer
+and a WebGPU one (`?gpu=webgpu`). The page is served from your own computer by a small local server (127.0.0.1
+only) and reads the game's data from the folder `extract_disc.py` makes; nothing is uploaded and the build holds no
+game data. It is not a website: it does not let anyone host the game, and it needs the player's own disc like the
+PC build.
+
+```
+python port/tools/extract_disc.py <your disc image> gamedata
+python port/tools/wasm_build.py game && python port/tools/wasm_build.py port
+python port/tools/wasm_build.py data && python port/tools/wasm_build.py link
+python port/web/play.py gamedata
+```
+
+`play.py` starts the server and opens the page (a current Chrome or Edge: it needs JavaScript Promise Integration).
+The page has its own settings window (F1 or START + SELECT) with the PC version's settings, controller set-up with
+a picture of the controller, touch controls for phones and tablets, and saves kept in the browser with export and
+import. `python port/tools/browser_package.py <name>` makes a package to hand out (the page, the server and the
+unpacker; no game data). Build, toolchain and tests: [docs/BROWSER_BUILD.md](docs/BROWSER_BUILD.md); what works and
+how it was checked: [docs/BROWSER_FEATURE_MATRIX.md](docs/BROWSER_FEATURE_MATRIX.md).
+
+**Online play in the browser** is browser against browser, from the game's own Tenkaichi Budokai Online menu
+(Create Room, Join Room by code, chat, the meter). `net.c` is the same: its socket calls go through a small seam
+(`port/src/gs/net_io.h`), UDP natively, a WebRTC data channel in the page. Two browsers find each other through a
+signalling server under the room code (`port/web/signal`: a Cloudflare Worker, or `node port/web/signal/local.mjs`
+on one network), whose address goes in the page's Settings, Online; then Create Room on one side and Join Room on
+the other. Input delay only (no rollback yet), no Quick Match, and not against the PC build (different transports);
+tested with two pages on one computer. Details: [docs/BROWSER_ONLINE_PLAN.md](docs/BROWSER_ONLINE_PLAN.md).
+
 ## Layout
 
 | Path | Contents |
@@ -135,6 +166,9 @@ finished program fetches the values from your disc when it starts.
 | `port/data/` | The game's built-in data tables as shape only (labels, sizes, pointer slots), no values |
 | `port/release/` | The container and scripts that build the release archives |
 | `port/setup/` | The setup window |
+| `port/web/`, `port/src/web/` | The browser build: the page (settings, controllers, touch, saves, online) and its engine side |
+| `port/web/signal/` | The browser's signalling server for online play (room codes) |
+| `port/tests/web/` | The browser build's tests (headless Chrome) |
 | `port/third_party/` | Dear ImGui (MIT), the maths library of newlib |
 | `docs/` | Notes on the game (from the decompilation) and `docs/port/` on the port |
 
