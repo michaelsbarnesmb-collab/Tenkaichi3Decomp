@@ -25,8 +25,7 @@
 #include "ui.h"         /* PortVideo and the window helpers */
 #include "gs_texpack.h" /* texture packs (replacement textures) */
 #include "menu_text.h"  /* editable labels in the original menu texture slots */
-#include "menu_translation.h" /* optional language screen artwork */
-#include "menu_labels.h"      /* the chosen language's menu art from the European disc */
+#include "menu_labels.h"      /* European menu art and native language selector pictures */
 #include <math.h>
 
 /* Stage-name overlay: defined here (C) so both the renderer (gs_gpu.c) and the game's menu (menu_c_e.c) can
@@ -295,7 +294,9 @@ static GsTex tbo_text_texture(uint32_t id) {
 
 static GsTex tbo_texture(uint32_t id) {
     char path[1024] = {0};
-    SDL_Surface *png, *rgba;
+    SDL_Surface *png = NULL, *rgba = NULL;
+    uint8_t *native = NULL;
+    int nativeW = 0, nativeH = 0;
     uint32_t *px, w, h, x, y;
     GsTex tex;
     const char *base;
@@ -319,7 +320,11 @@ static GsTex tbo_texture(uint32_t id) {
         return gsWhite; /* (no room this frame: the next one tries again) */
     }
     if (languageArt) {
-        png = MenuTranslation_ArtPath((int)id, path, sizeof(path)) ? SDL_LoadPNG(path) : NULL;
+        if (MenuLabels_LanguageArtPixels((int)id, &native, &nativeW, &nativeH)) {
+            w = (uint32_t)nativeW;
+            h = (uint32_t)nativeH;
+            snprintf(path, sizeof(path), "EU disc PZS3EU0.AFS selector texture %u", (unsigned)id);
+        }
     } else {
         base = SDL_GetBasePath();
         snprintf(path, sizeof(path), "%stbo/ui/%s.png", base != NULL ? base : "", kTboNames[id]);
@@ -337,21 +342,23 @@ static GsTex tbo_texture(uint32_t id) {
     if (png != NULL) {
         SDL_DestroySurface(png);
     }
-    if (rgba == NULL) {
-        fprintf(stderr, "bt3: artwork: cannot read %s\n", path);
+    if (native == NULL && rgba == NULL) {
+        fprintf(stderr, "bt3: artwork: cannot read %s\n", languageArt ? "EU disc selector textures" : path);
         *missing = 1;
         return gsWhite;
     }
-    w = (uint32_t)rgba->w;
-    h = (uint32_t)rgba->h;
+    if (rgba != NULL) {
+        w = (uint32_t)rgba->w;
+        h = (uint32_t)rgba->h;
+    }
     px = malloc((size_t)w * h * 4);
     for (y = 0; px != NULL && y < h; y++) {
-        const uint8_t *row = (const uint8_t *)rgba->pixels + (size_t)y * rgba->pitch;
+        const uint8_t *row = native != NULL ? native + (size_t)y * w * 4 : (const uint8_t *)rgba->pixels + (size_t)y * rgba->pitch;
         for (x = 0; x < w; x++) {
             const uint8_t *c = row + x * 4;
             uint32_t imageAlpha = c[3];
             uint32_t a;
-            /* These arrow PNGs use 127 for their solid pixels. Preserve the antialiased edge while
+            /* The original arrow textures use 127 for their solid pixels. Preserve the antialiased edge while
                bringing the chevron itself up to full opacity over the green selection bar. */
             if (languageArt && id != TBO_LANG_BG) {
                 imageAlpha = imageAlpha * 2 > 255 ? 255 : imageAlpha * 2;
@@ -366,7 +373,8 @@ static GsTex tbo_texture(uint32_t id) {
             }
         }
     }
-    SDL_DestroySurface(rgba);
+    free(native);
+    if (rgba != NULL) SDL_DestroySurface(rgba);
     tex = tbo_upload(px, w, h);
     if (tex == 0) {
         return gsWhite;
